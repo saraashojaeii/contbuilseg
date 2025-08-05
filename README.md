@@ -123,9 +123,75 @@ python scripts/train_segformer.py \
 
 ### Training UNet
 
+The UNet training script now supports automatic dataset organization and model/prediction saving with dataset-specific prefixes.
+
+**Basic Training Command:**
 ```bash
-python scripts/train_unet.py --data_dir /root/home/pvc/building_segmetation_datasets/massachusetts/ --use_contours --contour_dir /root/home/pvc/building_segmetation_datasets/massachusetts/ --batch_size 8 --learning_rate 1e-4 --epochs 100 --save_every 10 --mask_weight 0.7 --contour_weight 0.3 --output_dir ./outputs --model_save_dir ./checkpoints/unet
+python scripts/train_unet.py --data_dir /path/to/your/base/data/directory --dataset_name "massachusetts" --use_contours --batch_size 8 --learning_rate 1e-4 --epochs 100 --save_every 10 --mask_weight 0.7 --contour_weight 0.3 --output_dir ./outputs --model_save_dir ./checkpoints
 ```
+
+**Multiple Dataset Examples:**
+```bash
+# Train on Massachusetts dataset
+python scripts/train_unet.py --data_dir /path/to/datasets --dataset_name "massachusetts" --use_contours --epochs 100
+
+# Train on WHU dataset
+python scripts/train_unet.py --data_dir /path/to/datasets --dataset_name "whu" --use_contours --epochs 100
+
+# Train on custom dataset
+python scripts/train_unet.py --data_dir /path/to/datasets --dataset_name "custom_buildings" --use_contours --epochs 100
+```
+
+**Expected Directory Structure:**
+The script expects your data to be organized as `data_dir/{dataset_name}/`:
+```
+/path/to/datasets/
+├── massachusetts/
+│   ├── train/
+│   ├── train_labels/
+│   ├── train_contours/
+│   ├── val/
+│   ├── val_labels/
+│   ├── val_contours/
+│   ├── test/
+│   └── test_labels/
+├── whu/
+│   ├── train/
+│   ├── train_labels/
+│   └── ...
+└── custom_buildings/
+    ├── train/
+    ├── train_labels/
+    └── ...
+```
+
+**Output Organization:**
+Each dataset will create organized output folders:
+```
+checkpoints/
+├── massachusetts_models/
+│   ├── massachusetts_epoch_001.pth
+│   ├── massachusetts_epoch_002.pth
+│   └── massachusetts_latest.pth
+├── massachusetts_predictions/
+│   ├── epoch_001/
+│   │   ├── sample_01/
+│   │   │   ├── input.png
+│   │   │   ├── mask_gt.png
+│   │   │   ├── mask_pred.png
+│   │   │   └── combined_visualization.png
+│   │   └── sample_02/...
+│   └── epoch_002/...
+└── whu_models/
+    └── ...
+```
+
+**Features:**
+- ✅ Automatic model checkpoint saving at each epoch
+- ✅ Validation prediction visualization saving
+- ✅ wandb integration for metrics and visualization logging
+- ✅ Dataset-specific organization
+- ✅ Support for both mask-only and mask+contour training
 
 ## Evaluation
 

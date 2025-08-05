@@ -627,7 +627,7 @@ class UNetTrainer(BaseTrainer):
                 sample_data = validation_images[0]
                 if sample_data['contours'] is not None:
                     # Case with contours
-                    wandb_images = self._create_wandb_images(
+                    wandb_images = self._create_validation_visualizations(
                         sample_data['images'],
                         sample_data['masks'],
                         sample_data['mask_preds'],
@@ -637,7 +637,7 @@ class UNetTrainer(BaseTrainer):
                     )
                 else:
                     # Case without contours
-                    wandb_images = self._create_wandb_images(
+                    wandb_images = self._create_validation_visualizations(
                         sample_data['images'],
                         sample_data['masks'],
                         sample_data['mask_preds'],
