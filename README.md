@@ -124,7 +124,7 @@ python scripts/train_segformer.py \
 ### Training UNet
 
 ```bash
-python scripts/train_unet.py --data_dir /root/home/pvc/building_segmentation_datasets/massachusetts/ --use_contours --contour_dir /root/home/pvc/building_segmentation_datasets/massachusetts/ --batch_size 8 --learning_rate 1e-4 --epochs 100 --save_every 10 --mask_weight 0.7 --contour_weight 0.3 --output_dir ./outputs --model_save_dir ./checkpoints/unet
+python scripts/train_unet.py --data_dir /root/home/pvc/building_segmetation_datasets/massachusetts/ --use_contours --contour_dir /root/home/pvc/building_segmetation_datasets/massachusetts/ --batch_size 8 --learning_rate 1e-4 --epochs 100 --save_every 10 --mask_weight 0.7 --contour_weight 0.3 --output_dir ./outputs --model_save_dir ./checkpoints/unet
 ```
 
 ## Evaluation

@@ -41,11 +41,11 @@ def parse_args():
     
     # Data paths
     parser.add_argument("--data_dir", type=str, required=True,
-                        help="Root directory containing data folders")
+                        help="Base directory containing dataset folders (dataset will be at data_dir/dataset_name)")
+    parser.add_argument("--dataset_name", type=str, required=True,
+                        help="Name of the dataset (used for organizing saved models and predictions)")
     parser.add_argument("--use_contours", action="store_true",
                         help="Whether to use contour maps for training")
-    parser.add_argument("--contour_dir", type=str, default=None,
-                        help="Directory containing contour maps (if use_contours=True)")
     
     # Model parameters
     parser.add_argument("--in_channels", type=int, default=3,
@@ -105,25 +105,28 @@ def main():
     # Supported image extensions
     image_extensions = ['png', 'jpg', 'jpeg', 'tif', 'tiff']
     
+    # Construct dataset-specific directory path
+    dataset_dir = os.path.join(args.data_dir, args.dataset_name)
+    
     # Get data paths
-    train_img_paths = find_files_with_extensions(os.path.join(args.data_dir, 'train'), image_extensions)
-    train_mask_paths = find_files_with_extensions(os.path.join(args.data_dir, 'train_labels'), image_extensions)
+    train_img_paths = find_files_with_extensions(os.path.join(dataset_dir, 'train'), image_extensions)
+    train_mask_paths = find_files_with_extensions(os.path.join(dataset_dir, 'train_labels'), image_extensions)
     
-    val_img_paths = find_files_with_extensions(os.path.join(args.data_dir, 'val'), image_extensions)
-    val_mask_paths = find_files_with_extensions(os.path.join(args.data_dir, 'val_labels'), image_extensions)
+    val_img_paths = find_files_with_extensions(os.path.join(dataset_dir, 'val'), image_extensions)
+    val_mask_paths = find_files_with_extensions(os.path.join(dataset_dir, 'val_labels'), image_extensions)
     
-    test_img_paths = find_files_with_extensions(os.path.join(args.data_dir, 'test'), image_extensions)
-    test_mask_paths = find_files_with_extensions(os.path.join(args.data_dir, 'test_labels'), image_extensions)
+    test_img_paths = find_files_with_extensions(os.path.join(dataset_dir, 'test'), image_extensions)
+    test_mask_paths = find_files_with_extensions(os.path.join(dataset_dir, 'test_labels'), image_extensions)
     
     # Get contour paths if needed
     train_contour_paths = None
     val_contour_paths = None
     test_contour_paths = None
     
-    if args.use_contours and args.contour_dir:
-        train_contour_paths = find_files_with_extensions(os.path.join(args.contour_dir, 'train_contours'), image_extensions)
-        val_contour_paths = find_files_with_extensions(os.path.join(args.contour_dir, 'val_contours'), image_extensions)
-        test_contour_paths = find_files_with_extensions(os.path.join(args.contour_dir, 'test_contours'), image_extensions)
+    if args.use_contours:
+        train_contour_paths = find_files_with_extensions(os.path.join(dataset_dir, 'train_contours'), image_extensions)
+        val_contour_paths = find_files_with_extensions(os.path.join(dataset_dir, 'val_contours'), image_extensions)
+        test_contour_paths = find_files_with_extensions(os.path.join(dataset_dir, 'test_contours'), image_extensions)
         
         print(f"Found {len(train_contour_paths)} training contours, {len(val_contour_paths)} validation contours, "
               f"and {len(test_contour_paths)} test contours")
@@ -168,7 +171,8 @@ def main():
         learning_rate=args.learning_rate,
         model_save_dir=args.model_save_dir,
         mask_weight=args.mask_weight,
-        contour_weight=args.contour_weight
+        contour_weight=args.contour_weight,
+        dataset_name=args.dataset_name
     )
     
     # Train model
