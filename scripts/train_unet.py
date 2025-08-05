@@ -18,6 +18,23 @@ from data.dataset import CustomDataset
 from training.unet_trainer import UNetTrainer
 
 
+def find_files_with_extensions(directory, extensions):
+    """
+    Find files with any of the specified extensions in a directory.
+    
+    Args:
+        directory: Directory to search in
+        extensions: List of file extensions to search for (without dots)
+    
+    Returns:
+        Sorted list of file paths
+    """
+    files = []
+    for ext in extensions:
+        files.extend(glob.glob(os.path.join(directory, f'*.{ext}')))
+    return sorted(files)
+
+
 def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description="Train UNet model for building segmentation")
@@ -85,15 +102,18 @@ def main():
         transforms.ToTensor(),
     ])
     
+    # Supported image extensions
+    image_extensions = ['png', 'jpg', 'jpeg', 'tif', 'tiff']
+    
     # Get data paths
-    train_img_paths = sorted(glob.glob(os.path.join(args.data_dir, 'train', '*.tiff')))
-    train_mask_paths = sorted(glob.glob(os.path.join(args.data_dir, 'train_labels', '*.tif')))
+    train_img_paths = find_files_with_extensions(os.path.join(args.data_dir, 'train'), image_extensions)
+    train_mask_paths = find_files_with_extensions(os.path.join(args.data_dir, 'train_labels'), image_extensions)
     
-    val_img_paths = sorted(glob.glob(os.path.join(args.data_dir, 'val', '*.tiff')))
-    val_mask_paths = sorted(glob.glob(os.path.join(args.data_dir, 'val_labels', '*.tif')))
+    val_img_paths = find_files_with_extensions(os.path.join(args.data_dir, 'val'), image_extensions)
+    val_mask_paths = find_files_with_extensions(os.path.join(args.data_dir, 'val_labels'), image_extensions)
     
-    test_img_paths = sorted(glob.glob(os.path.join(args.data_dir, 'test', '*.tiff')))
-    test_mask_paths = sorted(glob.glob(os.path.join(args.data_dir, 'test_labels', '*.tif')))
+    test_img_paths = find_files_with_extensions(os.path.join(args.data_dir, 'test'), image_extensions)
+    test_mask_paths = find_files_with_extensions(os.path.join(args.data_dir, 'test_labels'), image_extensions)
     
     # Get contour paths if needed
     train_contour_paths = None
@@ -101,9 +121,9 @@ def main():
     test_contour_paths = None
     
     if args.use_contours and args.contour_dir:
-        train_contour_paths = sorted(glob.glob(os.path.join(args.contour_dir, 'train_contours', '*.tif')))
-        val_contour_paths = sorted(glob.glob(os.path.join(args.contour_dir, 'val_contours', '*.tif')))
-        test_contour_paths = sorted(glob.glob(os.path.join(args.contour_dir, 'test_contours', '*.tif')))
+        train_contour_paths = find_files_with_extensions(os.path.join(args.contour_dir, 'train_contours'), image_extensions)
+        val_contour_paths = find_files_with_extensions(os.path.join(args.contour_dir, 'val_contours'), image_extensions)
+        test_contour_paths = find_files_with_extensions(os.path.join(args.contour_dir, 'test_contours'), image_extensions)
         
         print(f"Found {len(train_contour_paths)} training contours, {len(val_contour_paths)} validation contours, "
               f"and {len(test_contour_paths)} test contours")

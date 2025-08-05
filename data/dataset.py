@@ -102,6 +102,23 @@ class CustomDataset(Dataset):
         return image, mask, contour
 
 
+def find_files_with_extensions(directory: str, extensions: List[str]) -> List[str]:
+    """
+    Find files with any of the specified extensions in a directory.
+    
+    Args:
+        directory: Directory to search in
+        extensions: List of file extensions to search for (without dots)
+    
+    Returns:
+        Sorted list of file paths
+    """
+    files = []
+    for ext in extensions:
+        files.extend(glob.glob(os.path.join(directory, f'*.{ext}')))
+    return sorted(files)
+
+
 def get_data_paths(data_dir: str) -> Dict[str, Dict[str, List[str]]]:
     """
     Get paths to images and masks for train, validation, and test sets.
@@ -112,18 +129,21 @@ def get_data_paths(data_dir: str) -> Dict[str, Dict[str, List[str]]]:
     Returns:
         Dictionary containing paths for train, val and test splits
     """
+    # Supported image extensions
+    image_extensions = ['png', 'jpg', 'jpeg', 'tif', 'tiff']
+    
     paths = {
         'train': {
-            'images': glob.glob(os.path.join(data_dir, 'train', '*.tiff')),
-            'masks': glob.glob(os.path.join(data_dir, 'train_labels', '*.tif')),
+            'images': find_files_with_extensions(os.path.join(data_dir, 'train'), image_extensions),
+            'masks': find_files_with_extensions(os.path.join(data_dir, 'train_labels'), image_extensions),
         },
         'val': {
-            'images': glob.glob(os.path.join(data_dir, 'val', '*.tiff')),
-            'masks': glob.glob(os.path.join(data_dir, 'val_labels', '*.tif')),
+            'images': find_files_with_extensions(os.path.join(data_dir, 'val'), image_extensions),
+            'masks': find_files_with_extensions(os.path.join(data_dir, 'val_labels'), image_extensions),
         },
         'test': {
-            'images': glob.glob(os.path.join(data_dir, 'test', '*.tiff')),
-            'masks': glob.glob(os.path.join(data_dir, 'test_labels', '*.tif')),
+            'images': find_files_with_extensions(os.path.join(data_dir, 'test'), image_extensions),
+            'masks': find_files_with_extensions(os.path.join(data_dir, 'test_labels'), image_extensions),
         }
     }
     
