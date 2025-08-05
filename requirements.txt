@@ -19,3 +19,4 @@ albumentations>=1.1.0
 # Optional dependencies
 jupyter>=1.0.0
 seaborn>=0.11.2
+wandb>=0.13.0
