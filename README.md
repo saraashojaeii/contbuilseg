@@ -59,6 +59,41 @@ data/
 
 For contour-aware segmentation with UNet, optional contour maps can be provided in folders like `train_contours/`.
 
+### Generating Contour-based Masks
+
+The repository includes a utility script `contour_distance_transform.py` for generating inverted saturated distance transform masks from binary segmentation labels. These contour-based masks can be used for contour-aware training or as additional supervision signals.
+
+#### Usage
+
+##### Single Image Processing
+
+```bash
+# Process a single binary mask
+python contour_distance_transform.py --input mask.png --output contour_mask.png --saturation 50
+```
+
+#### Batch Directory Processing
+
+```bash
+# Process all images in a directory
+python contour_distance_transform.py --input_dir ./dataset/labels --output_dir ./dataset/contours --saturation 20
+
+# Alternative syntax (backward compatible)
+python contour_distance_transform.py --input ./input_directory --output ./output_directory --saturation 30
+```
+
+### Parameters
+
+- `--input` / `-i`: Input binary mask image path or directory
+- `--output` / `-o`: Output image path or directory
+- `--input_dir`: Input directory containing binary masks (explicit)
+- `--output_dir`: Output directory for results (explicit)
+- `--saturation` / `-s`: Saturation value for distance transform (default: 50)
+- `--demo`: Run with demo sample mask
+
+
+The script automatically creates the output directory if it doesn't exist and preserves the original filenames. Progress is displayed during batch processing, showing which files are being processed and the final completion status.
+
 ## Models
 
 ### SegFormer
