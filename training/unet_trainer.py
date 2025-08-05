@@ -11,9 +11,9 @@ import wandb
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 
-from .train import BaseTrainer
-from ..utils.losses import BCEWithDiceLoss, DiceLoss
-from ..evaluation.metrics import compute_metrics, compute_metrics_batch
+from training.train import BaseTrainer
+from utils.losses import BCEWithDiceLoss, DiceLoss
+from evaluation.metrics import compute_metrics, compute_metrics_batch
 
 
 class UNetTrainer(BaseTrainer):

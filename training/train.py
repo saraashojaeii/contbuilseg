@@ -10,7 +10,7 @@ from torch.optim import Adam, AdamW
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
-from ..evaluation.metrics import compute_metrics, compute_metrics_batch
+from evaluation.metrics import compute_metrics, compute_metrics_batch
 
 
 class BaseTrainer:
