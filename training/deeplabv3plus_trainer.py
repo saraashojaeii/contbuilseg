@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 
 from training.train import BaseTrainer
-from utils.losses import BCEWithDiceLoss, DiceLoss
+from utils.losses import BCEWithDiceLoss, DiceLoss, L1Loss
 from evaluation.metrics import compute_metrics, compute_metrics_batch
 
 
@@ -83,13 +83,14 @@ class DeepLabV3PlusTrainer(BaseTrainer):
     def _get_loss_fn(self):
         """
         Get combined loss function for DeepLabV3+.
+        Binary mask uses BCE+Dice loss, contour uses L1 loss for distance transform.
         
         Returns:
             Dictionary of loss functions
         """
         return {
             'mask': BCEWithDiceLoss(dice_weight=0.5, bce_weight=0.5),
-            'contour': BCEWithDiceLoss(dice_weight=0.7, bce_weight=0.3)
+            'contour': L1Loss(reduction='mean')
         }
     
     def _create_validation_visualizations(self, images, masks, predictions, contours=None, contour_preds=None, max_samples=4):
@@ -114,7 +115,7 @@ class DeepLabV3PlusTrainer(BaseTrainer):
             # Convert tensors to numpy and move to CPU
             img = images[i].cpu().numpy()
             mask_gt = masks[i].cpu().numpy().squeeze()
-            mask_pred = torch.sigmoid(predictions[i]).cpu().numpy().squeeze()
+            mask_pred = predictions[i].cpu().numpy().squeeze()  # Already sigmoid-activated
             
             # Normalize image for display (assuming it's in [0,1] or needs normalization)
             if img.shape[0] == 3:  # RGB image
@@ -131,7 +132,7 @@ class DeepLabV3PlusTrainer(BaseTrainer):
                 fig, axes = plt.subplots(2, 3, figsize=(15, 10))
                 
                 contour_gt = contours[i].cpu().numpy().squeeze()
-                contour_pred = torch.sigmoid(contour_preds[i]).cpu().numpy().squeeze()
+                contour_pred = contour_preds[i].cpu().numpy().squeeze()  # Distance transform, no sigmoid
                 
                 # Top row: masks
                 axes[0, 0].imshow(img, cmap='gray' if len(img.shape) == 2 else None)
@@ -248,7 +249,7 @@ class DeepLabV3PlusTrainer(BaseTrainer):
             # Convert tensors to numpy and move to CPU
             img = images[i].cpu().numpy()
             mask_gt = masks[i].cpu().numpy().squeeze()
-            mask_pred = torch.sigmoid(mask_preds[i]).cpu().numpy().squeeze()
+            mask_pred = mask_preds[i].cpu().numpy().squeeze()  # Already sigmoid-activated
             
             # Normalize image for display
             if img.shape[0] == 3:  # RGB image
@@ -281,7 +282,7 @@ class DeepLabV3PlusTrainer(BaseTrainer):
             # Save contours if available
             if contours is not None and contour_preds is not None:
                 contour_gt = contours[i].cpu().numpy().squeeze()
-                contour_pred = torch.sigmoid(contour_preds[i]).cpu().numpy().squeeze()
+                contour_pred = contour_preds[i].cpu().numpy().squeeze()  # Distance transform, no sigmoid
                 
                 contour_gt_img = (contour_gt * 255).astype(np.uint8)
                 contour_pred_img = (contour_pred * 255).astype(np.uint8)
@@ -294,7 +295,7 @@ class DeepLabV3PlusTrainer(BaseTrainer):
                 fig, axes = plt.subplots(2, 3, figsize=(15, 10))
                 
                 contour_gt = contours[i].cpu().numpy().squeeze()
-                contour_pred = torch.sigmoid(contour_preds[i]).cpu().numpy().squeeze()
+                contour_pred = contour_preds[i].cpu().numpy().squeeze()  # Distance transform, no sigmoid
                 
                 # Top row: masks
                 axes[0, 0].imshow(img, cmap='gray' if len(img.shape) == 2 else None)

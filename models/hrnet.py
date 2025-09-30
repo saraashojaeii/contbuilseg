@@ -289,7 +289,8 @@ class HRNet(nn.Module):
 
         # Output heads
         mask_output = torch.sigmoid(self.mask_head(x))
-        contour_output = torch.sigmoid(self.contour_head(x))
+        # Contour output is distance transform (continuous values), no sigmoid
+        contour_output = self.contour_head(x)
 
         return mask_output, contour_output
 

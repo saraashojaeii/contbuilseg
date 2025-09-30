@@ -9,9 +9,12 @@ tqdm>=4.62.0
 Pillow>=8.3.0
 opencv-python>=4.5.0
 
-# For SegFormer model
+# For SegFormer and Mask2Former models
 transformers>=4.16.0
 accelerate>=0.6.0
+
+# For SWIN-UNET model
+einops>=0.6.0
 
 # For data handling
 albumentations>=1.1.0
@@ -22,3 +25,4 @@ seaborn>=0.11.2
 wandb>=0.13.0
 
 # Note: DeepLabV3+ and HRNet use torchvision and standard PyTorch modules
+# Note: Mask2Former uses HuggingFace transformers library

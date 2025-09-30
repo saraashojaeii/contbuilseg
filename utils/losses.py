@@ -152,3 +152,39 @@ class FocalLoss(nn.Module):
             return loss.sum()
         else:
             return loss
+
+
+class L1Loss(nn.Module):
+    """
+    L1 Loss (Mean Absolute Error) for regression tasks.
+    Used for inverted saturated distance transform contour prediction.
+    """
+    def __init__(self, reduction='mean'):
+        """
+        Initialize L1 Loss.
+        
+        Args:
+            reduction: Reduction method ('mean', 'sum', or 'none')
+        """
+        super(L1Loss, self).__init__()
+        self.reduction = reduction
+        
+    def forward(self, predictions, targets):
+        """
+        Forward pass.
+        
+        Args:
+            predictions: Model predictions, shape [batch_size, channels, height, width]
+            targets: Ground truth, shape [batch_size, channels, height, width]
+            
+        Returns:
+            L1 loss
+        """
+        loss = torch.abs(predictions - targets)
+        
+        if self.reduction == 'mean':
+            return loss.mean()
+        elif self.reduction == 'sum':
+            return loss.sum()
+        else:
+            return loss

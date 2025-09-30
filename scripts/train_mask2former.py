@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Script to train a UNet model for building segmentation with optional contour awareness.
+Script to train a Mask2Former model for building segmentation with optional contour awareness.
 """
 
 import os
@@ -13,9 +13,9 @@ import glob
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from models.unet import get_unet_model
+from models.mask2former import get_mask2former_model
 from data.dataset import CustomDataset
-from training.unet_trainer import UNetTrainer
+from training.mask2former_trainer import Mask2FormerTrainer
 
 
 def find_files_with_extensions(directory, extensions):
@@ -37,12 +37,12 @@ def find_files_with_extensions(directory, extensions):
 
 def parse_args():
     """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description="Train UNet model for building segmentation")
+    parser = argparse.ArgumentParser(description="Train Mask2Former model for building segmentation")
     
     # Data paths
-    parser.add_argument("--data_dir", type=str, required=True, default="/root/home/pvc/building_segmetation_datasets/", 
+    parser.add_argument("--data_dir", type=str, required=True,
                         help="Base directory containing dataset folders (dataset will be at data_dir/dataset_name)")
-    parser.add_argument("--dataset_name", type=str, required=True, default="massachusetts",
+    parser.add_argument("--dataset_name", type=str, required=True,
                         help="Name of the dataset (used for organizing saved models and predictions)")
     parser.add_argument("--use_contours", action="store_true",
                         help="Whether to use contour maps for training")
@@ -54,11 +54,15 @@ def parse_args():
                         help="Number of output channels for mask")
     parser.add_argument("--out_channels_contour", type=int, default=1,
                         help="Number of output channels for contour")
+    parser.add_argument("--pretrained", action="store_true",
+                        help="Use pretrained Mask2Former weights")
+    parser.add_argument("--use_simplified", action="store_true",
+                        help="Use simplified Mask2Former architecture")
     
     # Training parameters
-    parser.add_argument("--batch_size", type=int, default=8,
-                        help="Batch size for training")
-    parser.add_argument("--learning_rate", type=float, default=1e-4,
+    parser.add_argument("--batch_size", type=int, default=4,
+                        help="Batch size for training (Mask2Former is memory-intensive)")
+    parser.add_argument("--learning_rate", type=float, default=1e-5,
                         help="Learning rate")
     parser.add_argument("--epochs", type=int, default=100,
                         help="Number of training epochs")
@@ -70,9 +74,9 @@ def parse_args():
                         help="Weight for contour loss")
     
     # Output paths
-    parser.add_argument("--output_dir", type=str, default="/root/home/pvc/conbuildseg_results",
+    parser.add_argument("--output_dir", type=str, default="./outputs",
                         help="Directory to save outputs")
-    parser.add_argument("--model_save_dir", type=str, default="/root/home/pvc/conbuildseg_results/checkpoints/unet",
+    parser.add_argument("--model_save_dir", type=str, default="./checkpoints/mask2former",
                         help="Directory to save model checkpoints")
     
     # Device settings
@@ -83,7 +87,7 @@ def parse_args():
 
 
 def main():
-    """Main function to train UNet model."""
+    """Main function to train Mask2Former model."""
     args = parse_args()
     
     # Create output directories
@@ -91,14 +95,17 @@ def main():
     os.makedirs(args.model_save_dir, exist_ok=True)
     
     # Initialize model
-    model = get_unet_model(
+    model = get_mask2former_model(
         in_channels=args.in_channels,
         out_channels_mask=args.out_channels_mask,
-        out_channels_contour=args.out_channels_contour
+        out_channels_contour=args.out_channels_contour,
+        pretrained=args.pretrained,
+        use_simplified=args.use_simplified
     )
     
     # Define transforms
     transform = transforms.Compose([
+        transforms.Resize((512, 512)),  # Mask2Former typically uses larger images
         transforms.ToTensor(),
     ])
     
@@ -163,7 +170,7 @@ def main():
     )
     
     # Initialize trainer
-    trainer = UNetTrainer(
+    trainer = Mask2FormerTrainer(
         model=model,
         train_loader=train_loader,
         val_loader=val_loader,

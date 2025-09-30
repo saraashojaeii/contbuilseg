@@ -68,7 +68,8 @@ class UNet(nn.Module):
         
         # Output
         mask_output = torch.sigmoid(self.out_conv_mask(d1))
-        contour_output = torch.sigmoid(self.out_conv_contour(d1))
+        # Contour output is distance transform (continuous values), no sigmoid
+        contour_output = self.out_conv_contour(d1)
         
         return mask_output, contour_output
 
