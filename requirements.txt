@@ -20,3 +20,5 @@ albumentations>=1.1.0
 jupyter>=1.0.0
 seaborn>=0.11.2
 wandb>=0.13.0
+
+# Note: DeepLabV3+ and HRNet use torchvision and standard PyTorch modules
