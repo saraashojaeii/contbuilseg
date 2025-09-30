@@ -28,7 +28,7 @@ This repository contains a modularized implementation of building segmentation u
 - [Requirements](#requirements)
 - [Citation](#citation)
 - [License](#license) -->
-
+<!-- 
 ## Features
 
 ✨ **Multiple State-of-the-Art Models** - Choose from 4 different architectures (SegFormer, UNet, DeepLabV3+, HRNet)  
@@ -37,7 +37,7 @@ This repository contains a modularized implementation of building segmentation u
 🔄 **Wandb Integration** - Track experiments with Weights & Biases  
 💾 **Smart Checkpointing** - Automatic model saving with dataset-specific organization  
 🛠️ **Modular Design** - Easy to extend and customize for your needs  
-📈 **Comprehensive Metrics** - IoU, F1-score, precision, recall, and more
+📈 **Comprehensive Metrics** - IoU, F1-score, precision, recall, and more -->
 
 ## Quick Start
 
@@ -130,13 +130,13 @@ For contour-aware segmentation with UNet, optional contour maps can be provided 
 The repository includes a utility script `contour_distance_transform.py` for generating inverted saturated distance transform masks from binary segmentation labels. These contour-based masks can be used for contour-aware training or as additional supervision signals.
 
 #### Usage
-
+<!-- 
 ##### Single Image Processing
 
 ```bash
 # Process a single binary mask
 python contour_distance_transform.py --input mask.png --output contour_mask.png --saturation 50
-```
+``` -->
 
 #### Batch Directory Processing
 
@@ -185,7 +185,7 @@ High-Resolution Network (HRNet) maintains high-resolution representations throug
 - **Repeated multi-scale fusion** to exchange information between branches
 - **High-resolution feature maps** preserved from beginning to end
 - **Dual output heads** for both mask and contour prediction -->
-
+<!-- 
 ## Model Comparison
 
 | Model | Strengths | Best For | Computational Cost |
@@ -199,7 +199,7 @@ High-Resolution Network (HRNet) maintains high-resolution representations throug
 - **Start with UNet** for quick prototyping and baseline results
 - **Use DeepLabV3+** for best balance of performance and efficiency
 - **Choose HRNet** when boundary precision is critical
-- **Try SegFormer** for multi-class segmentation tasks
+- **Try SegFormer** for multi-class segmentation tasks -->
 
 ## Training Sample
 
