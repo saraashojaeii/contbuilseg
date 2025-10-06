@@ -9,7 +9,7 @@ from tqdm import tqdm
 import numpy as np
 
 from .train import BaseTrainer
-from ..evaluation.metrics import compute_metrics
+# from ..evaluation.metrics import compute_metrics
 
 
 class SegFormerTrainer(BaseTrainer):
