@@ -127,7 +127,7 @@ def main():
         train_contour_paths = find_files_with_extensions(os.path.join(dataset_dir, 'train_contours'), image_extensions)
         val_contour_paths = find_files_with_extensions(os.path.join(dataset_dir, 'val_contours'), image_extensions)
         test_contour_paths = find_files_with_extensions(os.path.join(dataset_dir, 'test_contours'), image_extensions)
-        
+        print("Contour paths:", train_contour_paths)
         print(f"Found {len(train_contour_paths)} training contours, {len(val_contour_paths)} validation contours, "
               f"and {len(test_contour_paths)} test contours")
     
