@@ -23,7 +23,11 @@ def parse_args():
     
     # Data paths
     parser.add_argument("--data_dir", type=str, required=True,
-                        help="Root directory containing data folders")
+                        help="Base directory containing dataset folders (dataset will be at data_dir/dataset_name)")
+    parser.add_argument("--dataset_name", type=str, required=True,
+                        help="Name of the dataset (used for organizing saved models and predictions)")
+    parser.add_argument("--use_contours", action="store_true",
+                        help="Whether to use contour maps for training (currently not used by SegFormer)")
     
     # Model parameters
     parser.add_argument("--model_name", type=str, default="nvidia/mit-b0",
@@ -54,6 +58,23 @@ def parse_args():
     return parser.parse_args()
 
 
+def find_files_with_extensions(directory, extensions):
+    """
+    Find files with any of the specified extensions in a directory.
+    
+    Args:
+        directory: Directory to search in
+        extensions: List of file extensions to search for (without dots)
+    
+    Returns:
+        Sorted list of file paths
+    """
+    files = []
+    for ext in extensions:
+        files.extend(glob.glob(os.path.join(directory, f'*.{ext}')))
+    return sorted(files)
+
+
 def main():
     """Main function to train SegFormer model."""
     args = parse_args()
@@ -71,15 +92,22 @@ def main():
     model = segformer.get_model()
     image_processor = segformer.get_image_processor()
     
+    # Supported image extensions
+    image_extensions = ['png', 'jpg', 'jpeg', 'tif', 'tiff']
+    
+    # Construct dataset-specific directory path
+    dataset_dir = os.path.join(args.data_dir, args.dataset_name)
+    print(f"Dataset directory: {dataset_dir}")
+    
     # Get data paths
-    train_img_paths = sorted(glob.glob(os.path.join(args.data_dir, 'train', '*.tiff')))
-    train_mask_paths = sorted(glob.glob(os.path.join(args.data_dir, 'train_labels', '*.tif')))
+    train_img_paths = find_files_with_extensions(os.path.join(dataset_dir, 'train'), image_extensions)
+    train_mask_paths = find_files_with_extensions(os.path.join(dataset_dir, 'train_labels'), image_extensions)
     
-    val_img_paths = sorted(glob.glob(os.path.join(args.data_dir, 'val', '*.tiff')))
-    val_mask_paths = sorted(glob.glob(os.path.join(args.data_dir, 'val_labels', '*.tif')))
+    val_img_paths = find_files_with_extensions(os.path.join(dataset_dir, 'val'), image_extensions)
+    val_mask_paths = find_files_with_extensions(os.path.join(dataset_dir, 'val_labels'), image_extensions)
     
-    test_img_paths = sorted(glob.glob(os.path.join(args.data_dir, 'test', '*.tiff')))
-    test_mask_paths = sorted(glob.glob(os.path.join(args.data_dir, 'test_labels', '*.tif')))
+    test_img_paths = find_files_with_extensions(os.path.join(dataset_dir, 'test'), image_extensions)
+    test_mask_paths = find_files_with_extensions(os.path.join(dataset_dir, 'test_labels'), image_extensions)
     
     print(f"Found {len(train_img_paths)} training images, {len(val_img_paths)} validation images, "
           f"and {len(test_img_paths)} test images")
