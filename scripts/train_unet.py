@@ -107,7 +107,7 @@ def main():
     
     # Construct dataset-specific directory path
     dataset_dir = os.path.join(args.data_dir, args.dataset_name)
-    
+    print("Dataset directory:", dataset_dir)
     # Get data paths
     train_img_paths = find_files_with_extensions(os.path.join(dataset_dir, 'train'), image_extensions)
     train_mask_paths = find_files_with_extensions(os.path.join(dataset_dir, 'train_labels'), image_extensions)
