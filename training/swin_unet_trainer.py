@@ -251,6 +251,25 @@ class SwinUNetTrainer(BaseTrainer):
         running_contour_loss = 0.0
         step = 0
         
+        # Initialize metrics tracking for training
+        train_metrics = {
+            'iou': 0.0,
+            'dice': 0.0,
+            'precision': 0.0,
+            'recall': 0.0,
+            'f1': 0.0
+        }
+        
+        train_contour_metrics = {
+            'iou': 0.0,
+            'dice': 0.0,
+            'precision': 0.0,
+            'recall': 0.0,
+            'f1': 0.0
+        }
+        
+        has_contours = False
+        
         pbar = tqdm(self.train_loader, desc=f"Epoch {epoch} [Train]")
         
         for batch in pbar:
@@ -273,6 +292,19 @@ class SwinUNetTrainer(BaseTrainer):
                 running_loss += loss.item()
                 running_mask_loss += mask_loss.item()
                 running_contour_loss += contour_loss.item()
+                
+                # Calculate metrics for mask
+                with torch.no_grad():
+                    batch_metrics = compute_metrics_batch(mask_pred, masks)
+                    for k, v in batch_metrics.items():
+                        train_metrics[k] += v
+                    
+                    # Calculate metrics for contour
+                    batch_contour_metrics = compute_metrics_batch(contour_pred, contours)
+                    for k, v in batch_contour_metrics.items():
+                        train_contour_metrics[k] += v
+                    
+                    has_contours = True
                 
                 if self.use_wandb and step % 10 == 0:
                     wandb.log({
@@ -311,6 +343,12 @@ class SwinUNetTrainer(BaseTrainer):
                 running_loss += loss.item()
                 running_mask_loss += loss.item()
                 
+                # Calculate metrics for mask
+                with torch.no_grad():
+                    batch_metrics = compute_metrics_batch(mask_pred, masks)
+                    for k, v in batch_metrics.items():
+                        train_metrics[k] += v
+                
                 if self.use_wandb and step % 10 == 0:
                     wandb.log({
                         'train/step_loss': loss.item(),
@@ -325,15 +363,33 @@ class SwinUNetTrainer(BaseTrainer):
         avg_loss = running_loss / len(self.train_loader)
         avg_mask_loss = running_mask_loss / len(self.train_loader)
         
+        # Average the metrics
+        for k in train_metrics:
+            train_metrics[k] /= len(self.train_loader)
+        
+        if has_contours:
+            for k in train_contour_metrics:
+                train_contour_metrics[k] /= len(self.train_loader)
+        
         if self.use_wandb:
             log_dict = {
                 'train/epoch_loss': avg_loss,
                 'train/epoch_mask_loss': avg_mask_loss,
+                'train/iou': train_metrics['iou'],
+                'train/dice': train_metrics['dice'],
+                'train/precision': train_metrics['precision'],
+                'train/recall': train_metrics['recall'],
+                'train/f1': train_metrics['f1'],
                 'epoch': epoch
             }
             if running_contour_loss > 0:
                 avg_contour_loss = running_contour_loss / len(self.train_loader)
                 log_dict['train/epoch_contour_loss'] = avg_contour_loss
+                log_dict['train/contour_iou'] = train_contour_metrics['iou']
+                log_dict['train/contour_dice'] = train_contour_metrics['dice']
+                log_dict['train/contour_precision'] = train_contour_metrics['precision']
+                log_dict['train/contour_recall'] = train_contour_metrics['recall']
+                log_dict['train/contour_f1'] = train_contour_metrics['f1']
             
             wandb.log(log_dict)
         
