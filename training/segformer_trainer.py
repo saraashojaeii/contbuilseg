@@ -7,6 +7,8 @@ import torch.nn as nn
 from torch.optim import AdamW
 from tqdm import tqdm
 import numpy as np
+import wandb
+import matplotlib.pyplot as plt
 
 from .train import BaseTrainer
 # from ..evaluation.metrics import compute_metrics
@@ -17,7 +19,9 @@ class SegFormerTrainer(BaseTrainer):
     Trainer class for SegFormer model with semantic segmentation for buildings.
     """
     def __init__(self, model, train_loader, val_loader, device='cuda', 
-                learning_rate=2e-5, model_save_dir='./checkpoints'):
+                learning_rate=2e-5, model_save_dir='./checkpoints',
+                use_wandb=True, wandb_project='building_seg', wandb_run_name=None,
+                dataset_name='dataset'):
         """
         Initialize the SegFormerTrainer.
         
@@ -28,8 +32,27 @@ class SegFormerTrainer(BaseTrainer):
             device: Device to use for training ('cuda' or 'cpu')
             learning_rate: Learning rate for optimizer
             model_save_dir: Directory to save model checkpoints
+            use_wandb: Whether to enable Weights & Biases logging
+            wandb_project: W&B project name
+            wandb_run_name: Optional W&B run name
+            dataset_name: Dataset name for logging context
         """
         super().__init__(model, train_loader, val_loader, device, learning_rate, model_save_dir)
+        self.use_wandb = use_wandb
+        self.dataset_name = dataset_name
+
+        if self.use_wandb:
+            wandb.init(
+                project=wandb_project,
+                name=wandb_run_name,
+                config={
+                    'learning_rate': learning_rate,
+                    'device': device,
+                    'model_type': 'SegFormer',
+                    'dataset': dataset_name
+                }
+            )
+            wandb.watch(self.model, log='all', log_freq=100)
         
     def _get_optimizer(self):
         """
@@ -66,6 +89,7 @@ class SegFormerTrainer(BaseTrainer):
         
         pbar = tqdm(self.train_loader, desc=f"Epoch {epoch} [Train]")
         
+        step = 0
         for batch in pbar:
             # Move batch to device
             for k, v in batch.items():
@@ -91,9 +115,25 @@ class SegFormerTrainer(BaseTrainer):
             
             # Update progress bar
             pbar.set_postfix({'loss': loss.item()})
+            
+            # Step logging
+            if self.use_wandb and step % 10 == 0:
+                wandb.log({
+                    'train/step_loss': loss.item(),
+                    'train/step': step,
+                    'epoch': epoch
+                })
+            step += 1
         
         # Calculate average loss
         avg_loss = running_loss / len(self.train_loader)
+        
+        # Epoch-level logging
+        if self.use_wandb:
+            wandb.log({
+                'train/epoch_loss': avg_loss,
+                'epoch': epoch
+            })
         
         return avg_loss
     
@@ -126,6 +166,7 @@ class SegFormerTrainer(BaseTrainer):
         
         pbar = tqdm(self.val_loader, desc=f"Epoch {epoch} [Val]")
         
+        val_visual_logged = False
         with torch.no_grad():
             for batch in pbar:
                 # Move batch to device
@@ -190,6 +231,59 @@ class SegFormerTrainer(BaseTrainer):
                     'loss': loss.item(),
                     'miou': miou
                 })
+
+                # Log a small set of visuals from the first validation batch
+                if self.use_wandb and not val_visual_logged:
+                    try:
+                        imgs = batch['pixel_values'][:4].detach().cpu()
+                        preds = predictions[:4].detach().cpu()
+                        gts = batch['labels'][:4].detach().cpu()
+
+                        wandb_imgs = []
+                        for i in range(imgs.shape[0]):
+                            img = imgs[i]
+                            # Convert CHW to HWC and normalize to 0-255 for display
+                            if img.shape[0] in (1, 3):
+                                np_img = img.numpy()
+                                if np_img.shape[0] == 1:
+                                    np_img = np_img[0]
+                                else:
+                                    np_img = np.transpose(np_img, (1, 2, 0))
+                                # Simple min-max normalization for visualization
+                                np_min, np_max = np_img.min(), np_img.max()
+                                if np_max > np_min:
+                                    np_img = (np_img - np_min) / (np_max - np_min)
+                                np_img = (np_img * 255).astype(np.uint8)
+                            else:
+                                # Fallback to first 3 channels if present
+                                np_img = imgs[i, :3].numpy()
+                                np_img = np.transpose(np_img, (1, 2, 0))
+                                np_min, np_max = np_img.min(), np_img.max()
+                                if np_max > np_min:
+                                    np_img = (np_img - np_min) / (np_max - np_min)
+                                np_img = (np_img * 255).astype(np.uint8)
+
+                            fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+                            axes[0].imshow(np_img, cmap='gray' if np_img.ndim == 2 else None)
+                            axes[0].set_title('Input')
+                            axes[0].axis('off')
+
+                            axes[1].imshow(gts[i].numpy(), vmin=0, vmax=2, cmap='tab20')
+                            axes[1].set_title('GT')
+                            axes[1].axis('off')
+
+                            axes[2].imshow(preds[i].numpy(), vmin=0, vmax=2, cmap='tab20')
+                            axes[2].set_title('Pred')
+                            axes[2].axis('off')
+
+                            plt.tight_layout()
+                            wandb_imgs.append(wandb.Image(fig, caption=f'Sample {i+1}'))
+                            plt.close(fig)
+
+                        wandb.log({'val/predictions': wandb_imgs, 'epoch': epoch})
+                    except Exception:
+                        pass
+                    val_visual_logged = True
         
         # Calculate average loss and metrics
         avg_loss = running_loss / len(self.val_loader)
@@ -203,6 +297,22 @@ class SegFormerTrainer(BaseTrainer):
         # Add class-specific metrics to the metrics dictionary
         all_metrics.update(class_metrics)
         
+        # Log validation metrics
+        if self.use_wandb:
+            log_dict = {
+                'val/epoch_loss': avg_loss,
+                'val/iou': all_metrics['iou'],
+                'val/dice': all_metrics['dice'],
+                'val/precision': all_metrics['precision'],
+                'val/recall': all_metrics['recall'],
+                'val/f1': all_metrics['f1'],
+                'val/iou_bg': all_metrics['iou_bg'],
+                'val/iou_building': all_metrics['iou_building'],
+                'val/iou_boundary': all_metrics['iou_boundary'],
+                'epoch': epoch
+            }
+            wandb.log(log_dict)
+
         return avg_loss, all_metrics
     
     def save_model(self, epoch, final=False):

@@ -46,14 +46,19 @@ def parse_args():
                         help="Save model every N epochs")
     
     # Output paths
-    parser.add_argument("--output_dir", type=str, default="./outputs",
+    parser.add_argument("--output_dir", type=str, default="/root/home/pvc/conbuildseg_results/",
                         help="Directory to save outputs")
-    parser.add_argument("--model_save_dir", type=str, default="./checkpoints/segformer",
+    parser.add_argument("--model_save_dir", type=str, default="/root/home/pvc/conbuildseg_results/checkpoints/segformer",
                         help="Directory to save model checkpoints")
     
     # Device settings
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu",
                         help="Device to use for training (cuda or cpu)")
+    
+    # Weights & Biases
+    parser.add_argument("--use_wandb", action="store_true", help="Enable Weights & Biases logging")
+    parser.add_argument("--wandb_project", type=str, default="building_seg", help="W&B project name")
+    parser.add_argument("--wandb_run_name", type=str, default=None, help="Optional W&B run name")
     
     return parser.parse_args()
 
@@ -127,7 +132,11 @@ def main():
         val_loader=val_loader,
         device=args.device,
         learning_rate=args.learning_rate,
-        model_save_dir=args.model_save_dir
+        model_save_dir=args.model_save_dir,
+        use_wandb=args.use_wandb,
+        wandb_project=args.wandb_project,
+        wandb_run_name=args.wandb_run_name,
+        dataset_name=args.dataset_name
     )
     
     # Train model

@@ -79,6 +79,11 @@ def parse_args():
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu",
                         help="Device to use for training (cuda or cpu)")
     
+    # Weights & Biases
+    parser.add_argument("--use_wandb", action="store_true", help="Enable Weights & Biases logging")
+    parser.add_argument("--wandb_project", type=str, default="building_seg", help="W&B project name")
+    parser.add_argument("--wandb_run_name", type=str, default=None, help="Optional W&B run name")
+    
     return parser.parse_args()
 
 
@@ -172,7 +177,10 @@ def main():
         model_save_dir=args.model_save_dir,
         mask_weight=args.mask_weight,
         contour_weight=args.contour_weight,
-        dataset_name=args.dataset_name
+        dataset_name=args.dataset_name,
+        use_wandb=args.use_wandb,
+        wandb_project=args.wandb_project,
+        wandb_run_name=args.wandb_run_name
     )
     
     # Train model
