@@ -544,3 +544,171 @@ class UNetTrainer(BaseTrainer):
         
         # Return only training loss for this epoch
         return avg_loss
+
+    def _validate_epoch(self, epoch):
+        """
+        Validate UNet for one epoch.
+        Returns (avg_loss, metrics_dict).
+        """
+        self.model.eval()
+        running_loss = 0.0
+        running_merge_loss = 0.0
+
+        # Aggregate metrics
+        all_metrics = {
+            'iou': 0.0,
+            'dice': 0.0,
+            'precision': 0.0,
+            'recall': 0.0,
+            'f1': 0.0,
+            'accuracy': 0.0
+        }
+        contour_metrics = {
+            'iou': 0.0,
+            'dice': 0.0,
+            'precision': 0.0,
+            'recall': 0.0,
+            'f1': 0.0,
+            'accuracy': 0.0
+        }
+
+        has_contours = False
+        validation_images = []
+
+        pbar = tqdm(self.val_loader, desc=f"Epoch {epoch} [Val]")
+        with torch.no_grad():
+            for batch in pbar:
+                if len(batch) == 3:
+                    images, masks, contours = batch
+                    has_contours = True
+                    images = images.to(self.device)
+                    masks = masks.to(self.device)
+                    contours = contours.to(self.device)
+
+                    outputs = self.model(images)
+                    if isinstance(outputs, tuple):
+                        mask_pred, contour_pred = outputs
+                    else:
+                        # If model returns only one, treat as mask
+                        mask_pred, contour_pred = outputs, None
+
+                    mask_loss = self.loss_fn['mask'](mask_pred, masks)
+                    contour_loss = self.loss_fn['contour'](contour_pred, contours) if contour_pred is not None else 0.0
+                    merge_loss = self.loss_fn['merge'](mask_pred, masks)
+                    loss = (self.mask_weight * mask_loss +
+                            self.contour_weight * contour_loss +
+                            self.merge_weight * merge_loss)
+
+                    batch_metrics = compute_metrics_batch(mask_pred, masks)
+                    for k, v in batch_metrics.items():
+                        all_metrics[k] += v
+
+                    batch_contour_metrics = compute_metrics_batch(contour_pred, contours) if contour_pred is not None else None
+                    if batch_contour_metrics is not None:
+                        for k, v in batch_contour_metrics.items():
+                            contour_metrics[k] += v
+
+                    if len(validation_images) == 0 and self.use_wandb:
+                        validation_images.append({
+                            'images': images[:4].clone(),
+                            'masks': masks[:4].clone(),
+                            'mask_preds': mask_pred[:4].clone(),
+                            'contours': contours[:4].clone(),
+                            'contour_preds': (contour_pred[:4].clone() if contour_pred is not None else None)
+                        })
+
+                    running_loss += float(loss.item() if hasattr(loss, 'item') else loss)
+                    running_merge_loss += float(merge_loss.item())
+
+                    pbar.set_postfix({
+                        'loss': float(loss.item() if hasattr(loss, 'item') else loss),
+                        'merge_loss': float(merge_loss.item()),
+                        'iou': float(batch_metrics['iou'])
+                    })
+                else:
+                    images, masks = batch
+                    images = images.to(self.device)
+                    masks = masks.to(self.device)
+
+                    outputs = self.model(images)
+                    mask_pred = outputs[0] if isinstance(outputs, tuple) else outputs
+
+                    mask_loss = self.loss_fn['mask'](mask_pred, masks)
+                    merge_loss = self.loss_fn['merge'](mask_pred, masks)
+                    loss = self.mask_weight * mask_loss + self.merge_weight * merge_loss
+
+                    batch_metrics = compute_metrics_batch(mask_pred, masks)
+                    for k, v in batch_metrics.items():
+                        all_metrics[k] += v
+
+                    if len(validation_images) == 0 and self.use_wandb:
+                        validation_images.append({
+                            'images': images[:4].clone(),
+                            'masks': masks[:4].clone(),
+                            'mask_preds': mask_pred[:4].clone(),
+                            'contours': None,
+                            'contour_preds': None
+                        })
+
+                    running_loss += float(loss.item())
+                    running_merge_loss += float(merge_loss.item())
+
+                    pbar.set_postfix({
+                        'loss': float(loss.item()),
+                        'merge_loss': float(merge_loss.item()),
+                        'iou': float(batch_metrics['iou'])
+                    })
+
+        # Averages
+        num_batches = max(len(self.val_loader), 1)
+        avg_loss = running_loss / num_batches
+        for k in all_metrics:
+            all_metrics[k] /= num_batches
+        if has_contours:
+            for k in contour_metrics:
+                contour_metrics[k] /= num_batches
+            all_metrics.update({f'contour_{k}': v for k, v in contour_metrics.items()})
+
+        # Log to wandb
+        if self.use_wandb:
+            val_log = {
+                'val/epoch_loss': avg_loss,
+                'val/iou': all_metrics['iou'],
+                'val/dice': all_metrics['dice'],
+                'val/precision': all_metrics['precision'],
+                'val/recall': all_metrics['recall'],
+                'val/f1': all_metrics['f1'],
+                'epoch': epoch
+            }
+            if running_merge_loss > 0:
+                val_log['val/epoch_merge_loss'] = running_merge_loss / num_batches
+            if has_contours:
+                val_log.update({
+                    'val/contour_iou': all_metrics.get('contour_iou', 0.0),
+                    'val/contour_dice': all_metrics.get('contour_dice', 0.0),
+                    'val/contour_precision': all_metrics.get('contour_precision', 0.0),
+                    'val/contour_recall': all_metrics.get('contour_recall', 0.0),
+                    'val/contour_f1': all_metrics.get('contour_f1', 0.0)
+                })
+
+            # Visualizations
+            if validation_images:
+                sample = validation_images[0]
+                if sample['contours'] is not None and sample['contour_preds'] is not None:
+                    wandb_images = self._create_validation_visualizations(
+                        sample['images'], sample['masks'], sample['mask_preds'],
+                        sample['contours'], sample['contour_preds'], max_samples=4
+                    )
+                else:
+                    wandb_images = self._create_validation_visualizations(
+                        sample['images'], sample['masks'], sample['mask_preds'], max_samples=4
+                    )
+                val_log['val/predictions'] = wandb_images
+            wandb.log(val_log)
+
+        # Optionally save checkpoint and predictions
+        self._save_model_checkpoint(epoch, avg_loss, all_metrics)
+        if validation_images:
+            self._save_validation_predictions(epoch, validation_images)
+
+        return avg_loss, all_metrics
