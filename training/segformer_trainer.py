@@ -356,3 +356,50 @@ class SegFormerTrainer(BaseTrainer):
             self.model.load_state_dict(state)
 
         print(f"Loaded model from {checkpoint_path}")
+
+    def train(self, num_epochs=100, save_every=1):
+        """
+        Train the SegFormer model with model saving after each epoch.
+
+        Args:
+            num_epochs: Number of epochs to train
+            save_every: Save model after every epoch (set to 1 for every epoch)
+
+        Returns:
+            Training history
+        """
+        print(f"Starting SegFormer training for {num_epochs} epochs...")
+        start_time = time.time()
+
+        for epoch in range(1, num_epochs + 1):
+            # Train
+            train_loss = self._train_epoch(epoch)
+            self.history['train_loss'].append(train_loss)
+
+            # Validate
+            val_loss, metrics = self._validate_epoch(epoch)
+            self.history['val_loss'].append(val_loss)
+            self.history['metrics'].append(metrics)
+
+            # Print progress
+            print(f"Epoch {epoch}/{num_epochs}, "
+                  f"Train Loss: {train_loss:.6f}, "
+                  f"Val Loss: {val_loss:.6f}, "
+                  f"IoU: {metrics['iou']:.4f}, "
+                  f"F1: {metrics['f1']:.4f}")
+
+            # Save model after each epoch
+            self.save_model(epoch, final=False)
+
+            # Plot losses at regular intervals or at the end
+            if epoch % max(10, num_epochs // 10) == 0 or epoch == num_epochs:
+                self._plot_losses()
+
+        # Save final model
+        self.save_model(num_epochs, final=True)
+
+        # Calculate training time
+        training_time = time.time() - start_time
+        print(f"Training completed in {training_time/60:.2f} minutes")
+
+        return self.history

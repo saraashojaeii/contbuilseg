@@ -291,7 +291,8 @@ def compute_metrics_batch(pred_masks, gt_masks):
         'dice': 0,
         'precision': 0,
         'recall': 0,
-        'f1': 0
+        'f1': 0,
+        'accuracy': 0
     }
     
     for i in range(batch_size):
