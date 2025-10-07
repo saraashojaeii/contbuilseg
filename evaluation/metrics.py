@@ -150,10 +150,23 @@ def compute_metrics(pred_mask, gt_mask):
 def _to_numpy_binary(x):
     if isinstance(x, torch.Tensor):
         x = x.detach().cpu().numpy()
+    # Reduce to 2D single-channel [H,W]
+    if x.ndim == 4:
+        # [B, C, H, W] -> take first item/channel
+        x = x[0, 0]
+    elif x.ndim == 3:
+        # [C, H, W] -> take first channel
+        x = x[0]
+    elif x.ndim != 2:
+        # Unexpected shape; try to squeeze
+        x = np.squeeze(x)
+        if x.ndim != 2:
+            raise ValueError(f"Expected 2D mask, got shape {x.shape}")
     x = x.astype(np.float32)
     if x.max() > 1:
         x = x / 255.0
-    return (x > 0.5).astype(np.uint8)
+    binmask = (x > 0.5).astype(np.uint8)
+    return binmask
 
 
 def compute_pixel_accuracy(pred_mask, gt_mask):
