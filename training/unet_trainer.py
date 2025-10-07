@@ -543,7 +543,8 @@ class UNetTrainer(BaseTrainer):
             'dice': 0.0,
             'precision': 0.0,
             'recall': 0.0,
-            'f1': 0.0
+            'f1': 0.0,
+            'accuracy': 0.0
         }
         
         contour_metrics = {
@@ -551,7 +552,8 @@ class UNetTrainer(BaseTrainer):
             'dice': 0.0,
             'precision': 0.0,
             'recall': 0.0,
-            'f1': 0.0
+            'f1': 0.0,
+            'accuracy': 0.0
         }
         
         has_contours = False
