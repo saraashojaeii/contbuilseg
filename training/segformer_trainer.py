@@ -168,7 +168,8 @@ class SegFormerTrainer(BaseTrainer):
         """
         self.model.eval()
         running_loss = 0.0
-        all_metrics = { 'iou': 0.0, 'dice': 0.0, 'precision': 0.0, 'recall': 0.0, 'f1': 0.0 }
+        # Accumulators for metrics
+        sum_metrics = { 'iou': 0.0, 'dice': 0.0, 'precision': 0.0, 'recall': 0.0, 'f1': 0.0 }
         pbar = tqdm(self.val_loader, desc=f"Epoch {epoch} [Val]")
         val_visual_logged = False
         with torch.no_grad():
@@ -190,6 +191,9 @@ class SegFormerTrainer(BaseTrainer):
                     loss = mask_loss
 
                 metrics = compute_metrics_batch(mask_pred, masks)
+                # accumulate
+                for k in sum_metrics:
+                    sum_metrics[k] += metrics[k]
                 running_loss += loss.item()
 
                 pbar.set_postfix({'loss': loss.item(), 'iou': metrics['iou']})
@@ -248,10 +252,19 @@ class SegFormerTrainer(BaseTrainer):
         
         # Calculate average loss and metrics
         avg_loss = running_loss / len(self.val_loader)
-        # We didn't accumulate metrics across the entire epoch; for simplicity, just log avg loss here.
+        # Average metrics over validation set
+        avg_metrics = {k: (v / len(self.val_loader)) for k, v in sum_metrics.items()}
         if self.use_wandb:
-            wandb.log({'val/epoch_loss': avg_loss, 'epoch': epoch})
-        return avg_loss, {'val_loss': avg_loss}
+            wandb.log({
+                'val/epoch_loss': avg_loss,
+                'val/iou': avg_metrics['iou'],
+                'val/dice': avg_metrics['dice'],
+                'val/precision': avg_metrics['precision'],
+                'val/recall': avg_metrics['recall'],
+                'val/f1': avg_metrics['f1'],
+                'epoch': epoch
+            })
+        return avg_loss, avg_metrics
     
     def save_model(self, epoch, final=False):
         """

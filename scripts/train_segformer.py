@@ -48,6 +48,8 @@ def parse_args():
                         help="Number of training epochs")
     parser.add_argument("--save_every", type=int, default=10,
                         help="Save model every N epochs")
+    parser.add_argument("--mask_weight", type=float, default=0.7, help="Weight for mask loss component")
+    parser.add_argument("--contour_weight", type=float, default=0.3, help="Weight for contour loss component")
     
     # Output paths
     parser.add_argument("--output_dir", type=str, default="/root/home/pvc/conbuildseg_results/",
@@ -124,12 +126,22 @@ def main():
     test_img_paths = find_files_with_extensions(os.path.join(dataset_dir, 'test'), image_extensions)
     test_mask_paths = find_files_with_extensions(os.path.join(dataset_dir, 'test_labels'), image_extensions)
     
+    # Optional contour paths if present
+    train_contour_paths = None
+    val_contour_paths = None
+    train_contour_dir = os.path.join(dataset_dir, 'train_contours')
+    val_contour_dir = os.path.join(dataset_dir, 'val_contours')
+    if os.path.isdir(train_contour_dir):
+        train_contour_paths = find_files_with_extensions(train_contour_dir, image_extensions)
+    if os.path.isdir(val_contour_dir):
+        val_contour_paths = find_files_with_extensions(val_contour_dir, image_extensions)
+    
     print(f"Found {len(train_img_paths)} training images, {len(val_img_paths)} validation images, "
           f"and {len(test_img_paths)} test images")
     
     # Create datasets
-    train_dataset = DataPrep(train_img_paths, train_mask_paths, image_processor)
-    val_dataset = DataPrep(val_img_paths, val_mask_paths, image_processor)
+    train_dataset = DataPrep(train_img_paths, train_mask_paths, image_processor, contour_paths=train_contour_paths)
+    val_dataset = DataPrep(val_img_paths, val_mask_paths, image_processor, contour_paths=val_contour_paths)
     
     # Create dataloaders
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
@@ -146,7 +158,9 @@ def main():
         use_wandb=args.use_wandb,
         wandb_project=args.wandb_project,
         wandb_run_name=args.wandb_run_name,
-        dataset_name=args.dataset_name
+        dataset_name=args.dataset_name,
+        mask_weight=args.mask_weight,
+        contour_weight=args.contour_weight
     )
     
     # Train model
