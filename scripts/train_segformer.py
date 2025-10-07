@@ -34,6 +34,10 @@ def parse_args():
                         help="Pretrained model name from HuggingFace")
     parser.add_argument("--num_labels", type=int, default=3,
                         help="Number of segmentation classes")
+    parser.add_argument("--hf_token", type=str, default=None,
+                        help="Optional Hugging Face access token for private/gated models")
+    parser.add_argument("--hf_revision", type=str, default=None,
+                        help="Optional model revision (e.g., a specific tag/commit)")
     
     # Training parameters
     parser.add_argument("--batch_size", type=int, default=8,
@@ -89,9 +93,15 @@ def main():
     os.makedirs(args.model_save_dir, exist_ok=True)
     
     # Initialize SegFormer model
+    chosen_model_name = args.model_name
+    if chosen_model_name.strip().lower() == "segformer":
+        print("[warn] 'segformer' is not a valid model id on Hugging Face; defaulting to 'nvidia/mit-b0'.")
+        chosen_model_name = "nvidia/mit-b0"
     segformer = get_segformer_model(
-        model_name=args.model_name,
-        num_labels=args.num_labels
+        model_name=chosen_model_name,
+        num_labels=args.num_labels,
+        hf_token=args.hf_token,
+        revision=args.hf_revision,
     )
     
     model = segformer.get_model()

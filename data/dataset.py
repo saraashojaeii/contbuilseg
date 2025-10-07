@@ -18,7 +18,7 @@ class DataPrep(Dataset):
     Dataset class for SegFormer model used for semantic segmentation of buildings.
     Loads RGB images and grayscale masks, and processes them using SegformerImageProcessor.
     """
-    def __init__(self, image_paths, label_paths1, image_processor):
+    def __init__(self, image_paths, label_paths1, image_processor, contour_paths: Optional[List[str]] = None):
         """
         Initialize the DataPrep dataset.
         
@@ -29,6 +29,7 @@ class DataPrep(Dataset):
         """
         self.image_paths = image_paths
         self.label1_paths = label_paths1
+        self.contour_paths = contour_paths
         self.image_processor = image_processor
 
     def __len__(self):
@@ -42,17 +43,34 @@ class DataPrep(Dataset):
             Encoded inputs containing pixel values and labels processed by SegformerImageProcessor
         """
         image = Image.open(self.image_paths[idx]).convert('RGB')
-        mask = Image.open(self.label1_paths[idx]).convert('L')
-        mask = np.array(mask).astype(np.uint8)
-        mask = Image.fromarray(mask)
-        
-        encoded_inputs = self.image_processor(image, segmentation_maps=mask, return_tensors="pt")
-        
-        # Remove batch dimension
-        for k, v in encoded_inputs.items():
-            encoded_inputs[k].squeeze_()
-        
-        return encoded_inputs
+        mask_img = Image.open(self.label1_paths[idx]).convert('L')
+        contour_img = None
+        if self.contour_paths is not None:
+            contour_img = Image.open(self.contour_paths[idx]).convert('L')
+
+        # Process image to tensor
+        proc = self.image_processor(image, return_tensors="pt")
+        pixel_values = proc["pixel_values"].squeeze(0)  # CxHxW
+        target_h, target_w = pixel_values.shape[-2], pixel_values.shape[-1]
+
+        # Prepare mask as float tensor in [0,1], resized to pixel_values size
+        mask_arr = np.array(mask_img).astype(np.float32) / 255.0
+        mask_resized = Image.fromarray((mask_arr * 255).astype(np.uint8)).resize((target_w, target_h), resample=Image.BILINEAR)
+        mask_tensor = torch.from_numpy(np.array(mask_resized).astype(np.float32) / 255.0).unsqueeze(0)
+
+        sample = {
+            'pixel_values': pixel_values,
+            'mask': mask_tensor,
+        }
+
+        # Prepare contour if available as float tensor (continuous), resized similarly
+        if contour_img is not None:
+            contour_arr = np.array(contour_img).astype(np.float32) / 255.0
+            contour_resized = Image.fromarray((contour_arr * 255).astype(np.uint8)).resize((target_w, target_h), resample=Image.BILINEAR)
+            contour_tensor = torch.from_numpy(np.array(contour_resized).astype(np.float32) / 255.0).unsqueeze(0)
+            sample['contours'] = contour_tensor
+
+        return sample
 
 
 class CustomDataset(Dataset):
