@@ -102,7 +102,7 @@ class BCEWithLogitsDiceLoss(nn.Module):
     def forward(self, logits, targets):
         # BCE on logits
         bce = self.bce_logits(logits, targets)
-        # Dice on probabilities
+        # Dice on probabilities from logits
         probs = torch.sigmoid(logits)
         dice = self.dice(probs, targets)
         return self.bce_weight * bce + self.dice_weight * dice
@@ -173,6 +173,85 @@ class FocalLoss(nn.Module):
             return loss.sum()
         else:
             return loss
+
+
+class MergeSeparationLoss(nn.Module):
+    """
+    Differentiable proxy loss for merge rate.
+    Penalizes high mask probabilities along ground-truth boundaries to encourage
+    separation between adjacent instances (reducing merges).
+
+    Implementation:
+    - Compute a thin GT boundary mask from binary targets using a convolutional
+      gradient kernel and optional dilation.
+    - Apply BCE on predicted probabilities against zeros ONLY on boundary pixels.
+    - Normalizes by the number of boundary pixels to keep scale stable.
+    """
+    def __init__(self, boundary_width: int = 1):
+        super().__init__()
+        self.boundary_width = max(int(boundary_width), 1)
+        # 3x3 gradient kernel to detect edges
+        k = torch.tensor([[0., 1., 0.],
+                          [1., -4., 1.],
+                          [0., 1., 0.]], dtype=torch.float32)
+        self.register_buffer('laplace_kernel', k.view(1, 1, 3, 3))
+        self.eps = 1e-6
+
+    def _make_boundary_mask(self, targets: torch.Tensor) -> torch.Tensor:
+        """Create a boundary mask from GT binary masks.
+        targets: [B, 1 or C, H, W] or [B, H, W]
+        Returns: [B, 1, H, W] float mask in {0,1}
+        """
+        if targets.dim() == 3:
+            targets = targets.unsqueeze(1)
+        # Ensure single-channel for boundary derivation
+        if targets.size(1) > 1:
+            # If multi-channel, assume binary mask in channel 0
+            t = targets[:, :1, ...]
+        else:
+            t = targets
+        t = t.float()
+        # Normalize to [0,1]
+        t = (t > 0.5).float()
+
+        # Convolve with Laplacian to detect edges
+        edges = F.conv2d(t, self.laplace_kernel, padding=1)
+        edges = edges.abs()
+        # Binarize edges
+        boundary = (edges > 0).float()
+
+        # Optional dilation by max-pooling to thicken boundary
+        if self.boundary_width > 1:
+            k = self.boundary_width
+            pad = k // 2
+            boundary = F.max_pool2d(boundary, kernel_size=k, stride=1, padding=pad)
+        return boundary
+
+    def forward(self, logits_or_probs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            logits_or_probs: raw mask logits or probabilities [B, 1 or C, H, W]
+            targets: GT mask [B, 1 or C, H, W] or [B, H, W]
+        Returns:
+            Scalar loss. Lower is better (fewer merges).
+        """
+        x = logits_or_probs
+        # Accept either logits or probabilities; detect by range
+        with torch.no_grad():
+            xmin = x.min().item()
+            xmax = x.max().item()
+        if xmin < 0.0 or xmax > 1.0:
+            probs = torch.sigmoid(x)
+        else:
+            probs = x
+        boundary = self._make_boundary_mask(targets)
+
+        # Create target zeros on boundary pixels; ignore elsewhere
+        # BCE on boundary pixels only
+        bce = F.binary_cross_entropy(probs, torch.zeros_like(probs), reduction='none')
+        masked = bce * boundary
+        denom = boundary.sum() + self.eps
+        return masked.sum() / denom
 
 
 class L1Loss(nn.Module):

@@ -12,7 +12,7 @@ import wandb
 import matplotlib.pyplot as plt
 
 from .train import BaseTrainer
-from utils.losses import BCEWithDiceLoss, BCEWithLogitsDiceLoss, L1Loss
+from utils.losses import BCEWithDiceLoss, BCEWithLogitsDiceLoss, L1Loss, MergeSeparationLoss
 from evaluation.metrics import compute_metrics_batch
 
 
@@ -23,7 +23,8 @@ class SegFormerTrainer(BaseTrainer):
     def __init__(self, model, train_loader, val_loader, device='cuda', 
                 learning_rate=2e-5, model_save_dir='./checkpoints',
                 use_wandb=True, wandb_project='building_seg', wandb_run_name=None,
-                dataset_name='dataset', mask_weight=0.7, contour_weight=0.3):
+                dataset_name='dataset', mask_weight=0.7, contour_weight=0.3,
+                merge_weight=0.0, merge_boundary_width: int = 1):
         """
         Initialize the SegFormerTrainer.
         
@@ -44,6 +45,8 @@ class SegFormerTrainer(BaseTrainer):
         self.dataset_name = dataset_name
         self.mask_weight = mask_weight
         self.contour_weight = contour_weight
+        self.merge_weight = merge_weight
+        self.merge_boundary_width = merge_boundary_width
 
         if self.use_wandb:
             wandb.init(
@@ -56,6 +59,8 @@ class SegFormerTrainer(BaseTrainer):
                     'dataset': dataset_name,
                     'mask_weight': mask_weight,
                     'contour_weight': contour_weight,
+                    'merge_weight': merge_weight,
+                    'merge_boundary_width': merge_boundary_width
                 }
             )
             wandb.watch(self.model, log='all', log_freq=100)
@@ -94,7 +99,8 @@ class SegFormerTrainer(BaseTrainer):
         """Return combined loss fns for mask and contour."""
         return {
             'mask': BCEWithLogitsDiceLoss(dice_weight=0.5, bce_weight=0.5),
-            'contour': L1Loss(reduction='mean')
+            'contour': L1Loss(reduction='mean'),
+            'merge': MergeSeparationLoss(boundary_width=self.merge_boundary_width)
         }
     
     def _train_epoch(self, epoch):
@@ -114,6 +120,7 @@ class SegFormerTrainer(BaseTrainer):
         step = 0
         pbar = tqdm(self.train_loader, desc=f"Epoch {epoch} [Train]")
 
+        running_merge_loss = 0.0
         for batch in pbar:
             pixel_values = batch['pixel_values'].to(self.device)
             masks = batch['mask'].to(self.device)
@@ -135,14 +142,19 @@ class SegFormerTrainer(BaseTrainer):
                     )
             # loss on logits
             mask_loss = self.loss_fn['mask'](mask_logits, masks)
+            merge_loss = self.loss_fn['merge'](mask_logits, masks)
             # probabilities for metrics only
             mask_pred = torch.sigmoid(mask_logits)
             if contours is not None:
                 contour_loss = self.loss_fn['contour'](contour_map, contours)
-                loss = self.mask_weight * mask_loss + self.contour_weight * contour_loss
+                loss = (
+                    self.mask_weight * mask_loss +
+                    self.contour_weight * contour_loss +
+                    self.merge_weight * merge_loss
+                )
             else:
                 contour_loss = torch.tensor(0.0, device=self.device)
-                loss = mask_loss
+                loss = self.mask_weight * mask_loss + self.merge_weight * merge_loss
 
             loss.backward()
             self.optimizer.step()
@@ -150,6 +162,8 @@ class SegFormerTrainer(BaseTrainer):
             running_loss += loss.item()
             running_mask_loss += mask_loss.item()
             running_contour_loss += contour_loss.item() if contours is not None else 0.0
+            # Track merge loss separately
+            running_merge_loss += merge_loss.item()
 
             # Metrics
             with torch.no_grad():
@@ -159,6 +173,7 @@ class SegFormerTrainer(BaseTrainer):
                 'loss': loss.item(),
                 'mask_loss': mask_loss.item(),
                 'contour_loss': contour_loss.item() if contours is not None else 0.0,
+                'merge_loss': merge_loss.item(),
                 'iou': batch_metrics['iou']
             })
 
@@ -171,6 +186,7 @@ class SegFormerTrainer(BaseTrainer):
                 }
                 if contours is not None:
                     log['train/step_contour_loss'] = contour_loss.item()
+                log['train/step_merge_loss'] = merge_loss.item()
                 wandb.log(log)
             step += 1
         
@@ -185,6 +201,8 @@ class SegFormerTrainer(BaseTrainer):
             }
             if running_contour_loss > 0:
                 log['train/epoch_contour_loss'] = running_contour_loss / len(self.train_loader)
+            if 'running_merge_loss' in locals():
+                log['train/epoch_merge_loss'] = running_merge_loss / len(self.train_loader)
             wandb.log(log)
         return avg_loss
     
@@ -224,12 +242,17 @@ class SegFormerTrainer(BaseTrainer):
                         )
                 # loss on logits
                 mask_loss = self.loss_fn['mask'](mask_logits, masks)
+                merge_loss = self.loss_fn['merge'](mask_logits, masks)
                 mask_pred = torch.sigmoid(mask_logits)
                 if contours is not None:
                     contour_loss = self.loss_fn['contour'](contour_map, contours)
-                    loss = self.mask_weight * mask_loss + self.contour_weight * contour_loss
+                    loss = (
+                        self.mask_weight * mask_loss +
+                        self.contour_weight * contour_loss +
+                        self.merge_weight * merge_loss
+                    )
                 else:
-                    loss = mask_loss
+                    loss = self.mask_weight * mask_loss + self.merge_weight * merge_loss
 
                 metrics = compute_metrics_batch(mask_pred, masks)
                 # accumulate
@@ -237,7 +260,7 @@ class SegFormerTrainer(BaseTrainer):
                     sum_metrics[k] += metrics[k]
                 running_loss += loss.item()
 
-                pbar.set_postfix({'loss': loss.item(), 'iou': metrics['iou']})
+                pbar.set_postfix({'loss': loss.item(), 'merge': merge_loss.item(), 'iou': metrics['iou']})
 
                 if self.use_wandb and not val_visual_logged:
                     try:

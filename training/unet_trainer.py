@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 
 from training.train import BaseTrainer
-from utils.losses import BCEWithDiceLoss, DiceLoss, L1Loss
+from utils.losses import BCEWithDiceLoss, DiceLoss, L1Loss, MergeSeparationLoss
 from evaluation.metrics import compute_metrics, compute_metrics_batch
 
 
@@ -24,7 +24,8 @@ class UNetTrainer(BaseTrainer):
     def __init__(self, model, train_loader, val_loader, device='cuda', 
                 learning_rate=1e-4, model_save_dir='./checkpoints',
                 mask_weight=0.7, contour_weight=0.3, use_wandb=True, 
-                wandb_project='building_seg', wandb_run_name=None, dataset_name='dataset'):
+                wandb_project='building_seg', wandb_run_name=None, dataset_name='dataset',
+                merge_weight: float = 0.0, merge_boundary_width: int = 1):
         """
         Initialize the UNetTrainer.
         
@@ -47,6 +48,8 @@ class UNetTrainer(BaseTrainer):
         self.contour_weight = contour_weight
         self.use_wandb = use_wandb
         self.dataset_name = dataset_name
+        self.merge_weight = merge_weight
+        self.merge_boundary_width = merge_boundary_width
         
         # Create directories for saving models and predictions
         import os
@@ -64,6 +67,8 @@ class UNetTrainer(BaseTrainer):
                     'learning_rate': learning_rate,
                     'mask_weight': mask_weight,
                     'contour_weight': contour_weight,
+                    'merge_weight': merge_weight,
+                    'merge_boundary_width': merge_boundary_width,
                     'device': device,
                     'model_type': 'UNet'
                 }
@@ -90,7 +95,8 @@ class UNetTrainer(BaseTrainer):
         """
         return {
             'mask': BCEWithDiceLoss(dice_weight=0.5, bce_weight=0.5),
-            'contour': L1Loss(reduction='mean')
+            'contour': L1Loss(reduction='mean'),
+            'merge': MergeSeparationLoss(boundary_width=self.merge_boundary_width)
         }
     
     def _create_validation_visualizations(self, images, masks, predictions, contours=None, contour_preds=None, max_samples=4):
@@ -358,6 +364,7 @@ class UNetTrainer(BaseTrainer):
         running_mask_loss = 0.0
         running_contour_loss = 0.0
         step = 0
+        running_merge_loss = 0.0
         
         # Initialize metrics tracking for training
         train_metrics = {
@@ -399,7 +406,8 @@ class UNetTrainer(BaseTrainer):
                 # Calculate losses
                 mask_loss = self.loss_fn['mask'](mask_pred, masks)
                 contour_loss = self.loss_fn['contour'](contour_pred, contours)
-                loss = self.mask_weight * mask_loss + self.contour_weight * contour_loss
+                merge_loss = self.loss_fn['merge'](mask_pred, masks)
+                loss = self.mask_weight * mask_loss + self.contour_weight * contour_loss + self.merge_weight * merge_loss
                 
                 # Backward pass and optimize
                 loss.backward()
@@ -409,6 +417,7 @@ class UNetTrainer(BaseTrainer):
                 running_loss += loss.item()
                 running_mask_loss += mask_loss.item()
                 running_contour_loss += contour_loss.item()
+                running_merge_loss += merge_loss.item()
                 
                 # Calculate metrics for mask
                 with torch.no_grad():
@@ -437,7 +446,8 @@ class UNetTrainer(BaseTrainer):
                 pbar.set_postfix({
                     'loss': loss.item(),
                     'mask_loss': mask_loss.item(),
-                    'contour_loss': contour_loss.item()
+                    'contour_loss': contour_loss.item(),
+                    'merge_loss': merge_loss.item()
                 })
                 
                 step += 1
@@ -459,7 +469,9 @@ class UNetTrainer(BaseTrainer):
                     mask_pred = outputs
                 
                 # Calculate loss
-                loss = self.loss_fn['mask'](mask_pred, masks)
+                mask_loss = self.loss_fn['mask'](mask_pred, masks)
+                merge_loss = self.loss_fn['merge'](mask_pred, masks)
+                loss = self.mask_weight * mask_loss + self.merge_weight * merge_loss
                 
                 # Backward pass and optimize
                 loss.backward()
@@ -467,7 +479,8 @@ class UNetTrainer(BaseTrainer):
                 
                 # Update running loss
                 running_loss += loss.item()
-                running_mask_loss += loss.item()
+                running_mask_loss += mask_loss.item()
+                running_merge_loss += merge_loss.item()
                 
                 # Calculate metrics for mask
                 with torch.no_grad():
@@ -485,7 +498,7 @@ class UNetTrainer(BaseTrainer):
                     })
                 
                 # Update progress bar
-                pbar.set_postfix({'loss': loss.item()})
+                pbar.set_postfix({'loss': loss.item(), 'merge_loss': merge_loss.item()})
                 
                 step += 1
         
@@ -513,7 +526,7 @@ class UNetTrainer(BaseTrainer):
                 'train/f1': train_metrics['f1'],
                 'epoch': epoch
             }
-            if running_contour_loss > 0:  # Only log if we have contour losses
+            if running_contour_loss > 0:
                 avg_contour_loss = running_contour_loss / len(self.train_loader)
                 log_dict['train/epoch_contour_loss'] = avg_contour_loss
                 log_dict['train/contour_iou'] = train_contour_metrics['iou']
@@ -521,194 +534,10 @@ class UNetTrainer(BaseTrainer):
                 log_dict['train/contour_precision'] = train_contour_metrics['precision']
                 log_dict['train/contour_recall'] = train_contour_metrics['recall']
                 log_dict['train/contour_f1'] = train_contour_metrics['f1']
-            
+            if running_merge_loss > 0:
+                avg_merge_loss = running_merge_loss / len(self.train_loader)
+                log_dict['train/epoch_merge_loss'] = avg_merge_loss
             wandb.log(log_dict)
-        
-        return avg_loss
-    
-    def _validate_epoch(self, epoch):
-        """
-        Validate UNet for one epoch.
-        
-        Args:
-            epoch: Current epoch number
-            
-        Returns:
-            Tuple of (average validation loss, metrics dictionary)
-        """
-        self.model.eval()
-        running_loss = 0.0
-        all_metrics = {
-            'iou': 0.0,
-            'dice': 0.0,
-            'precision': 0.0,
-            'recall': 0.0,
-            'f1': 0.0,
-            'accuracy': 0.0
-        }
-        
-        contour_metrics = {
-            'iou': 0.0,
-            'dice': 0.0,
-            'precision': 0.0,
-            'recall': 0.0,
-            'f1': 0.0,
-            'accuracy': 0.0
-        }
-        
-        has_contours = False
-        validation_images = []  # Store samples for visualization
-        
-        pbar = tqdm(self.val_loader, desc=f"Epoch {epoch} [Val]")
-        
-        with torch.no_grad():
-            for batch in pbar:
-                # Check if batch includes contour maps
-                if len(batch) == 3:
-                    images, masks, contours = batch
-                    has_contours = True
-                    images = images.to(self.device)
-                    masks = masks.to(self.device)
-                    contours = contours.to(self.device)
-                    
-                    # Forward pass
-                    mask_pred, contour_pred = self.model(images)
-                    
-                    # Calculate losses
-                    mask_loss = self.loss_fn['mask'](mask_pred, masks)
-                    contour_loss = self.loss_fn['contour'](contour_pred, contours)
-                    loss = self.mask_weight * mask_loss + self.contour_weight * contour_loss
-                    
-                    # Calculate metrics for mask
-                    batch_metrics = compute_metrics_batch(mask_pred, masks)
-                    for k, v in batch_metrics.items():
-                        all_metrics[k] += v
-                    
-                    # Calculate metrics for contour
-                    batch_contour_metrics = compute_metrics_batch(contour_pred, contours)
-                    for k, v in batch_contour_metrics.items():
-                        contour_metrics[k] += v
-                    
-                    # Store samples for visualization (first batch only)
-                    if len(validation_images) == 0 and self.use_wandb:
-                        validation_images.append({
-                            'images': images[:4].clone(),  # Store first 4 samples
-                            'masks': masks[:4].clone(),
-                            'mask_preds': mask_pred[:4].clone(),
-                            'contours': contours[:4].clone(),
-                            'contour_preds': contour_pred[:4].clone()
-                        })
-                    
-                    # Update progress bar
-                    pbar.set_postfix({
-                        'loss': loss.item(),
-                        'mask_loss': mask_loss.item(),
-                        'contour_loss': contour_loss.item(),
-                        'iou': batch_metrics['iou']
-                    })
-                else:
-                    # Handle case without contour maps
-                    images, masks = batch
-                    images = images.to(self.device)
-                    masks = masks.to(self.device)
-                    
-                    # Forward pass
-                    outputs = self.model(images)
-                    
-                    if isinstance(outputs, tuple):
-                        mask_pred = outputs[0]  # Just use the mask output
-                    else:
-                        mask_pred = outputs
-                    
-                    # Calculate loss
-                    loss = self.loss_fn['mask'](mask_pred, masks)
-                    
-                    # Calculate metrics
-                    batch_metrics = compute_metrics_batch(mask_pred, masks)
-                    for k, v in batch_metrics.items():
-                        all_metrics[k] += v
-                    
-                    # Store samples for visualization (first batch only)
-                    if len(validation_images) == 0 and self.use_wandb:
-                        validation_images.append({
-                            'images': images[:4].clone(),  # Store first 4 samples
-                            'masks': masks[:4].clone(),
-                            'mask_preds': mask_pred[:4].clone(),
-                            'contours': None,
-                            'contour_preds': None
-                        })
-                    
-                    # Update progress bar
-                    pbar.set_postfix({
-                        'loss': loss.item(),
-                        'iou': batch_metrics['iou']
-                    })
-                
-                # Update running loss
-                running_loss += loss.item()
-        
-        # Calculate average loss and metrics
-        avg_loss = running_loss / len(self.val_loader)
-        
-        for k in all_metrics:
-            all_metrics[k] /= len(self.val_loader)
-        
-        if has_contours:
-            for k in contour_metrics:
-                contour_metrics[k] /= len(self.val_loader)
-            
-            # Add contour metrics to the metrics dictionary
-            all_metrics.update({f'contour_{k}': v for k, v in contour_metrics.items()})
-        
-        # Log validation metrics and visualizations to wandb
-        if self.use_wandb:
-            # Prepare validation metrics for logging
-            val_log_dict = {
-                'val/epoch_loss': avg_loss,
-                'val/iou': all_metrics['iou'],
-                'val/dice': all_metrics['dice'],
-                'val/precision': all_metrics['precision'],
-                'val/recall': all_metrics['recall'],
-                'val/f1': all_metrics['f1'],
-                'epoch': epoch
-            }
-            
-            # Add contour metrics if available
-            if has_contours:
-                val_log_dict.update({
-                    'val/contour_iou': all_metrics['contour_iou'],
-                    'val/contour_dice': all_metrics['contour_dice'],
-                    'val/contour_precision': all_metrics['contour_precision'],
-                    'val/contour_recall': all_metrics['contour_recall'],
-                    'val/contour_f1': all_metrics['contour_f1']
-                })
-            
-            # Create and log visualizations
-            if validation_images:
-                sample_data = validation_images[0]
-                if sample_data['contours'] is not None:
-                    # Case with contours
-                    wandb_images = self._create_validation_visualizations(
-                        sample_data['images'],
-                        sample_data['masks'],
-                        sample_data['mask_preds'],
-                        sample_data['contours'],
-                        sample_data['contour_preds'],
-                        max_samples=4
-                    )
-                else:
-                    # Case without contours
-                    wandb_images = self._create_validation_visualizations(
-                        sample_data['images'],
-                        sample_data['masks'],
-                        sample_data['mask_preds'],
-                        max_samples=4
-                    )
-                
-                val_log_dict['val/predictions'] = wandb_images
-            
-            # Log everything to wandb
-            wandb.log(val_log_dict)
         
         # Save model checkpoint and validation predictions
         self._save_model_checkpoint(epoch, avg_loss, all_metrics)

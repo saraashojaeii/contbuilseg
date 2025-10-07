@@ -68,6 +68,10 @@ def parse_args():
                         help="Weight for mask loss")
     parser.add_argument("--contour_weight", type=float, default=0.3,
                         help="Weight for contour loss")
+    parser.add_argument("--merge_weight", type=float, default=0.0,
+                        help="Weight for merge separation loss (proxy for merge rate)")
+    parser.add_argument("--merge_boundary_width", type=int, default=1,
+                        help="Boundary width (pixels) used by merge separation loss")
     
     # Output paths
     parser.add_argument("--output_dir", type=str, default="/root/home/pvc/conbuildseg_results",
@@ -177,6 +181,8 @@ def main():
         model_save_dir=args.model_save_dir,
         mask_weight=args.mask_weight,
         contour_weight=args.contour_weight,
+        merge_weight=args.merge_weight,
+        merge_boundary_width=args.merge_boundary_width,
         dataset_name=args.dataset_name,
         use_wandb=args.use_wandb,
         wandb_project=args.wandb_project,
