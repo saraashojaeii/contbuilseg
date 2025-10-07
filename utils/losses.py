@@ -214,8 +214,9 @@ class MergeSeparationLoss(nn.Module):
         # Normalize to [0,1]
         t = (t > 0.5).float()
 
-        # Convolve with Laplacian to detect edges
-        edges = F.conv2d(t, self.laplace_kernel, padding=1)
+        # Convolve with Laplacian to detect edges (ensure kernel is on same device)
+        kernel = self.laplace_kernel.to(t.device)
+        edges = F.conv2d(t, kernel, padding=1)
         edges = edges.abs()
         # Binarize edges
         boundary = (edges > 0).float()
