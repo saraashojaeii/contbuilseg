@@ -87,6 +87,27 @@ class BCEWithDiceLoss(nn.Module):
         return self.bce_weight * bce_loss + self.dice_weight * dice_loss
 
 
+class BCEWithLogitsDiceLoss(nn.Module):
+    """
+    Combined BCEWithLogits + Dice loss. Safer numerically than BCE on probabilities.
+    Applies sigmoid internally for the Dice component and to compute probs.
+    """
+    def __init__(self, dice_weight=0.5, bce_weight=0.5):
+        super().__init__()
+        self.dice = DiceLoss()
+        self.bce_logits = nn.BCEWithLogitsLoss()
+        self.dice_weight = dice_weight
+        self.bce_weight = bce_weight
+
+    def forward(self, logits, targets):
+        # BCE on logits
+        bce = self.bce_logits(logits, targets)
+        # Dice on probabilities
+        probs = torch.sigmoid(logits)
+        dice = self.dice(probs, targets)
+        return self.bce_weight * bce + self.dice_weight * dice
+
+
 class FocalLoss(nn.Module):
     """
     Focal Loss for dealing with class imbalance.

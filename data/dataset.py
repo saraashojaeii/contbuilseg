@@ -18,7 +18,7 @@ class DataPrep(Dataset):
     Dataset class for SegFormer model used for semantic segmentation of buildings.
     Loads RGB images and grayscale masks, and processes them using SegformerImageProcessor.
     """
-    def __init__(self, image_paths, label_paths1, image_processor, contour_paths: Optional[List[str]] = None):
+    def __init__(self, image_paths, label_paths1, image_processor, contour_paths: Optional[List[str]] = None, processor_kwargs: Optional[Dict] = None):
         """
         Initialize the DataPrep dataset.
         
@@ -31,6 +31,8 @@ class DataPrep(Dataset):
         self.label1_paths = label_paths1
         self.contour_paths = contour_paths
         self.image_processor = image_processor
+        # Optional kwargs passed to image_processor during call (e.g., size or do_resize)
+        self.processor_kwargs = processor_kwargs or {'do_resize': False}
 
     def __len__(self):
         return len(self.image_paths)
@@ -49,7 +51,7 @@ class DataPrep(Dataset):
             contour_img = Image.open(self.contour_paths[idx]).convert('L')
 
         # Process image to tensor
-        proc = self.image_processor(image, return_tensors="pt")
+        proc = self.image_processor(image, return_tensors="pt", **self.processor_kwargs)
         pixel_values = proc["pixel_values"].squeeze(0)  # CxHxW
         target_h, target_w = pixel_values.shape[-2], pixel_values.shape[-1]
 

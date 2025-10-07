@@ -11,7 +11,7 @@ import wandb
 import matplotlib.pyplot as plt
 
 from .train import BaseTrainer
-from utils.losses import BCEWithDiceLoss, L1Loss
+from utils.losses import BCEWithDiceLoss, BCEWithLogitsDiceLoss, L1Loss
 from evaluation.metrics import compute_metrics_batch
 
 
@@ -66,12 +66,33 @@ class SegFormerTrainer(BaseTrainer):
         Returns:
             AdamW optimizer
         """
-        return AdamW(self.model.parameters(), lr=self.learning_rate)
+        # Two-tier learning rates: smaller for encoder, larger for heads
+        lr_backbone = self.learning_rate
+        lr_head = self.learning_rate * 10.0
+
+        encoder_params = []
+        head_params = []
+
+        for name, p in self.model.named_parameters():
+            if not p.requires_grad:
+                continue
+            # Parameters inside the HF encoder live under 'backbone.segformer'
+            if 'backbone.segformer' in name:
+                encoder_params.append(p)
+            else:
+                # includes backbone.decode_head and our contour_head
+                head_params.append(p)
+
+        param_groups = [
+            { 'params': encoder_params, 'lr': lr_backbone },
+            { 'params': head_params, 'lr': lr_head },
+        ]
+        return AdamW(param_groups, lr=lr_backbone)
     
     def _get_loss_fn(self):
         """Return combined loss fns for mask and contour."""
         return {
-            'mask': BCEWithDiceLoss(dice_weight=0.5, bce_weight=0.5),
+            'mask': BCEWithLogitsDiceLoss(dice_weight=0.5, bce_weight=0.5),
             'contour': L1Loss(reduction='mean')
         }
     
@@ -102,9 +123,19 @@ class SegFormerTrainer(BaseTrainer):
             self.optimizer.zero_grad()
 
             mask_logits, contour_map = self.model(pixel_values)
+            # Align predictions to GT spatial size if needed
+            if mask_logits.shape[-2:] != masks.shape[-2:]:
+                mask_logits = torch.nn.functional.interpolate(
+                    mask_logits, size=masks.shape[-2:], mode='bilinear', align_corners=False
+                )
+                if contour_map is not None and contour_map.shape[-2:] != masks.shape[-2:]:
+                    contour_map = torch.nn.functional.interpolate(
+                        contour_map, size=masks.shape[-2:], mode='bilinear', align_corners=False
+                    )
+            # loss on logits
+            mask_loss = self.loss_fn['mask'](mask_logits, masks)
+            # probabilities for metrics only
             mask_pred = torch.sigmoid(mask_logits)
-
-            mask_loss = self.loss_fn['mask'](mask_pred, masks)
             if contours is not None:
                 contour_loss = self.loss_fn['contour'](contour_map, contours)
                 loss = self.mask_weight * mask_loss + self.contour_weight * contour_loss
@@ -181,9 +212,18 @@ class SegFormerTrainer(BaseTrainer):
                     contours = contours.to(self.device)
 
                 mask_logits, contour_map = self.model(pixel_values)
+                # Align predictions to GT spatial size if needed
+                if mask_logits.shape[-2:] != masks.shape[-2:]:
+                    mask_logits = torch.nn.functional.interpolate(
+                        mask_logits, size=masks.shape[-2:], mode='bilinear', align_corners=False
+                    )
+                    if contour_map is not None and contour_map.shape[-2:] != masks.shape[-2:]:
+                        contour_map = torch.nn.functional.interpolate(
+                            contour_map, size=masks.shape[-2:], mode='bilinear', align_corners=False
+                        )
+                # loss on logits
+                mask_loss = self.loss_fn['mask'](mask_logits, masks)
                 mask_pred = torch.sigmoid(mask_logits)
-
-                mask_loss = self.loss_fn['mask'](mask_pred, masks)
                 if contours is not None:
                     contour_loss = self.loss_fn['contour'](contour_map, contours)
                     loss = self.mask_weight * mask_loss + self.contour_weight * contour_loss
