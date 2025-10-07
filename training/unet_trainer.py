@@ -542,9 +542,5 @@ class UNetTrainer(BaseTrainer):
                 log_dict['train/epoch_merge_loss'] = avg_merge_loss
             wandb.log(log_dict)
         
-        # Save model checkpoint and validation predictions
-        self._save_model_checkpoint(epoch, avg_loss, all_metrics)
-        if validation_images:
-            self._save_validation_predictions(epoch, validation_images)
-        
-        return avg_loss, all_metrics
+        # Return only training loss for this epoch
+        return avg_loss
