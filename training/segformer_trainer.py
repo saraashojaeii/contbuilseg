@@ -278,10 +278,19 @@ class SegFormerTrainer(BaseTrainer):
             save_path = f"{self.model_save_dir}/final_model"
         else:
             save_path = f"{self.model_save_dir}/epoch_{epoch}"
-        
-        self.model.save_pretrained(save_path)
-        
-        print(f"Model saved to {save_path}")
+
+        # Support either HF SegformerForSemanticSegmentation or our DualHeadSegFormer with .backbone
+        try:
+            if hasattr(self.model, 'save_pretrained'):
+                self.model.save_pretrained(save_path)
+            elif hasattr(self.model, 'backbone') and hasattr(self.model.backbone, 'save_pretrained'):
+                self.model.backbone.save_pretrained(save_path)
+            else:
+                # Fallback to state_dict
+                import torch
+                torch.save(self.model.state_dict(), f"{save_path}.pt")
+        finally:
+            print(f"Model saved to {save_path}")
     
     def load_checkpoint(self, checkpoint_path):
         """
@@ -291,8 +300,19 @@ class SegFormerTrainer(BaseTrainer):
             checkpoint_path: Path to checkpoint directory
         """
         from transformers import SegformerForSemanticSegmentation
-        
-        self.model = SegformerForSemanticSegmentation.from_pretrained(checkpoint_path)
-        self.model.to(self.device)
-        
+
+        # Try to load as HF checkpoint first
+        try:
+            loaded = SegformerForSemanticSegmentation.from_pretrained(checkpoint_path)
+            # If current model has a .backbone (our wrapper), swap it in
+            if hasattr(self.model, 'backbone'):
+                self.model.backbone = loaded.to(self.device)
+            else:
+                self.model = loaded.to(self.device)
+        except Exception:
+            # Fallback to plain state_dict
+            import torch
+            state = torch.load(checkpoint_path, map_location=self.device)
+            self.model.load_state_dict(state)
+
         print(f"Loaded model from {checkpoint_path}")

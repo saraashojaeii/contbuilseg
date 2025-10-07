@@ -53,9 +53,9 @@ class DataPrep(Dataset):
         pixel_values = proc["pixel_values"].squeeze(0)  # CxHxW
         target_h, target_w = pixel_values.shape[-2], pixel_values.shape[-1]
 
-        # Prepare mask as float tensor in [0,1], resized to pixel_values size
+        # Prepare mask as float tensor in [0,1], resized to pixel_values size (NEAREST to keep labels crisp)
         mask_arr = np.array(mask_img).astype(np.float32) / 255.0
-        mask_resized = Image.fromarray((mask_arr * 255).astype(np.uint8)).resize((target_w, target_h), resample=Image.BILINEAR)
+        mask_resized = Image.fromarray((mask_arr * 255).astype(np.uint8)).resize((target_w, target_h), resample=Image.NEAREST)
         mask_tensor = torch.from_numpy(np.array(mask_resized).astype(np.float32) / 255.0).unsqueeze(0)
 
         sample = {
@@ -63,10 +63,10 @@ class DataPrep(Dataset):
             'mask': mask_tensor,
         }
 
-        # Prepare contour if available as float tensor (continuous), resized similarly
+        # Prepare contour if available as float tensor, resized similarly (NEAREST keeps the intensity plateaus stable)
         if contour_img is not None:
             contour_arr = np.array(contour_img).astype(np.float32) / 255.0
-            contour_resized = Image.fromarray((contour_arr * 255).astype(np.uint8)).resize((target_w, target_h), resample=Image.BILINEAR)
+            contour_resized = Image.fromarray((contour_arr * 255).astype(np.uint8)).resize((target_w, target_h), resample=Image.NEAREST)
             contour_tensor = torch.from_numpy(np.array(contour_resized).astype(np.float32) / 255.0).unsqueeze(0)
             sample['contours'] = contour_tensor
 

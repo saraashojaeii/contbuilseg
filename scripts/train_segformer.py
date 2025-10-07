@@ -32,8 +32,8 @@ def parse_args():
     # Model parameters
     parser.add_argument("--model_name", type=str, default="nvidia/mit-b0",
                         help="Pretrained model name from HuggingFace")
-    parser.add_argument("--num_labels", type=int, default=3,
-                        help="Number of segmentation classes")
+    parser.add_argument("--num_labels", type=int, default=1,
+                        help="Number of segmentation classes (1 for binary building mask)")
     parser.add_argument("--hf_token", type=str, default=None,
                         help="Optional Hugging Face access token for private/gated models")
     parser.add_argument("--hf_revision", type=str, default=None,
@@ -99,6 +99,9 @@ def main():
     if chosen_model_name.strip().lower() == "segformer":
         print("[warn] 'segformer' is not a valid model id on Hugging Face; defaulting to 'nvidia/mit-b0'.")
         chosen_model_name = "nvidia/mit-b0"
+    if args.num_labels != 1:
+        print("[warn] Current trainer is binary-only. Overriding num_labels to 1.")
+        args.num_labels = 1
     segformer = get_segformer_model(
         model_name=chosen_model_name,
         num_labels=args.num_labels,
