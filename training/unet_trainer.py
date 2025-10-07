@@ -43,13 +43,16 @@ class UNetTrainer(BaseTrainer):
             wandb_run_name: Run name for wandb (optional)
             dataset_name: Name of the dataset for prefixing saved files
         """
-        super().__init__(model, train_loader, val_loader, device, learning_rate, model_save_dir)
+        # Set attributes needed by _get_loss_fn BEFORE calling BaseTrainer.__init__
         self.mask_weight = mask_weight
         self.contour_weight = contour_weight
         self.use_wandb = use_wandb
         self.dataset_name = dataset_name
         self.merge_weight = merge_weight
         self.merge_boundary_width = merge_boundary_width
+
+        # Now call BaseTrainer initializer (which invokes _get_loss_fn)
+        super().__init__(model, train_loader, val_loader, device, learning_rate, model_save_dir)
         
         # Create directories for saving models and predictions
         import os
