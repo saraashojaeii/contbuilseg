@@ -35,7 +35,7 @@ from evaluation.metrics import compute_all_metrics
 
 def parse_args():
     p = argparse.ArgumentParser(description="Test segmentation models and report advanced metrics")
-    p.add_argument('--model_type', choices=['unet', 'segformer'], required=True)
+    p.add_argument('--model_type', choices=['unet', 'hrnet', 'deeplabv3plus', 'swin_unet', 'mask2former', 'segformer'], required=True)
     p.add_argument('--checkpoint', type=str, required=True, help='Path to .pth (UNet) or HF dir (SegFormer)')
     p.add_argument('--data_dir', type=str, required=True, help='Root datasets directory')
     p.add_argument('--dataset_name', type=str, required=True, help='Dataset folder name under data_dir')
@@ -114,6 +114,69 @@ def test_unet(args, paths):
         print(f'{k}: {v:.4f}')
 
 
+def _test_generic_dual_head(args, paths, get_model_fn, model_name: str):
+    """
+    Helper for models that output (mask, contour), already at input resolution,
+    e.g., HRNet, DeepLabV3+, Swin-UNet, Mask2Former wrapper.
+    """
+    os.makedirs(args.output_dir, exist_ok=True)
+
+    transform = transforms.Compose([transforms.ToTensor()])
+    dataset = CustomDataset(paths['images'], paths['masks'], transform=transform)
+    loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
+
+    model = get_model_fn()
+    ckpt = torch.load(args.checkpoint, map_location='cpu')
+    state = ckpt['model_state_dict'] if isinstance(ckpt, dict) and 'model_state_dict' in ckpt else ckpt
+    model.load_state_dict(state)
+    model.to(args.device)
+    model.eval()
+
+    import pandas as pd
+    rows = []
+    with torch.no_grad():
+        idx = 0
+        for batch in loader:
+            images, masks = batch
+            images = images.to(args.device)
+            masks = masks.to(args.device)
+            outputs = model(images)
+            mask_pred = outputs[0] if isinstance(outputs, tuple) else outputs
+            mask_pred = upsample_like(mask_pred, masks)
+            m = compute_all_metrics(mask_pred.cpu(), masks.cpu())
+            m['sample_idx'] = idx
+            rows.append(m)
+            idx += 1
+
+    df = pd.DataFrame(rows)
+    df.to_csv(os.path.join(args.output_dir, f'{model_name}_{args.dataset_name}_{args.split}.csv'), index=False)
+
+    avg = df.drop(columns=['sample_idx'], errors='ignore').mean().to_dict()
+    print(f'\nAverages ({model_name}):')
+    for k, v in avg.items():
+        print(f'{k}: {v:.4f}')
+
+
+def test_hrnet(args, paths):
+    from models.hrnet import get_hrnet_model
+    return _test_generic_dual_head(args, paths, get_hrnet_model, 'hrnet')
+
+
+def test_deeplabv3plus(args, paths):
+    from models.deeplabv3plus import get_deeplabv3plus_model
+    return _test_generic_dual_head(args, paths, get_deeplabv3plus_model, 'deeplabv3plus')
+
+
+def test_swin_unet(args, paths):
+    from models.swin_unet import get_swin_unet_model
+    return _test_generic_dual_head(args, paths, get_swin_unet_model, 'swin_unet')
+
+
+def test_mask2former(args, paths):
+    from models.mask2former import get_mask2former_model
+    return _test_generic_dual_head(args, paths, get_mask2former_model, 'mask2former')
+
+
 def test_segformer(args, paths):
     from transformers import SegformerForSemanticSegmentation, SegformerImageProcessor
     os.makedirs(args.output_dir, exist_ok=True)
@@ -170,7 +233,15 @@ def main():
 
     if args.model_type == 'unet':
         test_unet(args, paths)
-    else:
+    elif args.model_type == 'hrnet':
+        test_hrnet(args, paths)
+    elif args.model_type == 'deeplabv3plus':
+        test_deeplabv3plus(args, paths)
+    elif args.model_type == 'swin_unet':
+        test_swin_unet(args, paths)
+    elif args.model_type == 'mask2former':
+        test_mask2former(args, paths)
+    elif args.model_type == 'segformer':
         test_segformer(args, paths)
 
 
