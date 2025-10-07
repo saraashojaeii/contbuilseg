@@ -222,9 +222,11 @@ class MergeSeparationLoss(nn.Module):
         boundary = (edges > 0).float()
 
         # Optional dilation by max-pooling to thicken boundary
+        # Use an odd kernel size to preserve spatial dimensions exactly
         if self.boundary_width > 1:
-            k = self.boundary_width
-            pad = k // 2
+            radius = max(self.boundary_width // 2, 1)
+            k = 2 * radius + 1  # force odd
+            pad = radius
             boundary = F.max_pool2d(boundary, kernel_size=k, stride=1, padding=pad)
         return boundary
 
