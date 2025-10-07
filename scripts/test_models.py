@@ -36,7 +36,7 @@ from evaluation.metrics import compute_all_metrics
 def parse_args():
     p = argparse.ArgumentParser(description="Test segmentation models and report advanced metrics")
     p.add_argument('--model_type', choices=['unet', 'hrnet', 'deeplabv3plus', 'swin_unet', 'mask2former', 'segformer'], required=True)
-    p.add_argument('--checkpoint', type=str, required=True, help='Path to .pth (UNet) or HF dir (SegFormer)')
+    p.add_argument('--checkpoint', type=str, required=True, help='Path to .pth (UNet/dual-head) or HF dir (SegFormer)')
     p.add_argument('--data_dir', type=str, required=True, help='Root datasets directory')
     p.add_argument('--dataset_name', type=str, required=True, help='Dataset folder name under data_dir')
     p.add_argument('--split', choices=['train', 'val', 'test'], default='test')
@@ -47,6 +47,7 @@ def parse_args():
     p.add_argument('--resize', action='store_true', help='Resize inputs via processor (SegFormer only)')
     p.add_argument('--height', type=int, default=512, help='Resize height when --resize used (SegFormer only)')
     p.add_argument('--width', type=int, default=512, help='Resize width when --resize used (SegFormer only)')
+    p.add_argument('--model_name', type=str, default='nvidia/mit-b0', help='SegFormer HF id when loading .pth checkpoints')
     return p.parse_args()
 
 
@@ -179,11 +180,25 @@ def test_mask2former(args, paths):
 
 def test_segformer(args, paths):
     from transformers import SegformerForSemanticSegmentation, SegformerImageProcessor
+    from models.segformer import DualHeadSegFormer
     os.makedirs(args.output_dir, exist_ok=True)
 
-    # Load HF model + processor
-    model = SegformerForSemanticSegmentation.from_pretrained(args.checkpoint)
-    processor = SegformerImageProcessor.from_pretrained(args.checkpoint)
+    is_file_ckpt = os.path.isfile(args.checkpoint)
+
+    if is_file_ckpt:
+        # Load our dual-head wrapper and its processor using provided model_name
+        processor = SegformerImageProcessor.from_pretrained(args.model_name)
+        model = DualHeadSegFormer(pretrained_model_name=args.model_name, num_labels=1)
+        ckpt = torch.load(args.checkpoint, map_location='cpu')
+        state = ckpt.get('model_state_dict', ckpt)
+        model.load_state_dict(state)
+        # When using our wrapper, forward returns (mask_logits, contour_map)
+        use_wrapper = True
+    else:
+        # HF directory
+        model = SegformerForSemanticSegmentation.from_pretrained(args.checkpoint)
+        processor = SegformerImageProcessor.from_pretrained(args.checkpoint)
+        use_wrapper = False
 
     proc_kwargs = {'do_resize': args.resize}
     if args.resize:
@@ -202,8 +217,11 @@ def test_segformer(args, paths):
         for batch in loader:
             pixel_values = batch['pixel_values'].to(args.device)
             masks = batch['mask'].to(args.device)
-            outputs = model(pixel_values=pixel_values)
-            logits = outputs.logits
+            if use_wrapper:
+                logits, _ = model(pixel_values)
+            else:
+                outputs = model(pixel_values=pixel_values)
+                logits = outputs.logits
             logits = upsample_like(logits, masks)
             probs = torch.sigmoid(logits)
 
