@@ -134,14 +134,131 @@ def compute_metrics(pred_mask, gt_mask):
     dice = compute_dice_coefficient(pred_mask, gt_mask)
     precision, recall = compute_precision_recall(pred_mask, gt_mask)
     f1 = 2 * (precision * recall) / (precision + recall + 1e-6)
+    # Pixel accuracy
+    acc = compute_pixel_accuracy(pred_mask, gt_mask)
     
     return {
         'iou': iou,
         'dice': dice,
         'precision': precision,
         'recall': recall,
-        'f1': f1
+        'f1': f1,
+        'accuracy': acc
     }
+
+
+def _to_numpy_binary(x):
+    if isinstance(x, torch.Tensor):
+        x = x.detach().cpu().numpy()
+    x = x.astype(np.float32)
+    if x.max() > 1:
+        x = x / 255.0
+    return (x > 0.5).astype(np.uint8)
+
+
+def compute_pixel_accuracy(pred_mask, gt_mask):
+    """
+    Pixel accuracy between two binary masks.
+    """
+    pred = _to_numpy_binary(pred_mask)
+    gt = _to_numpy_binary(gt_mask)
+    return (pred == gt).mean().item() if hasattr((pred==gt).mean(), 'item') else float((pred==gt).mean())
+
+
+def _label_instances(binary_mask):
+    """
+    Label connected components in a binary mask using 8-connectivity.
+    Returns labels image and number of components (excluding background).
+    """
+    mask = _to_numpy_binary(binary_mask)
+    num, labels = cv2.connectedComponents(mask.astype(np.uint8), connectivity=8)
+    # num includes background label 0
+    return labels, num - 1
+
+
+def _component_centroids(labels):
+    """
+    Compute centroids for labeled components (label>0). Returns list of (y, x).
+    """
+    centroids = []
+    max_label = labels.max()
+    for lab in range(1, max_label + 1):
+        ys, xs = np.where(labels == lab)
+        if ys.size == 0:
+            continue
+        cy = ys.mean()
+        cx = xs.mean()
+        centroids.append((cy, cx))
+    return centroids
+
+
+def compute_merge_rate(pred_mask, gt_mask):
+    """
+    Merge rate = 2*M / (N_gt + N_pred), where M is the number of predicted
+    instances that overlap with two or more GT instances (i.e., predicted merges).
+    """
+    pred = _to_numpy_binary(pred_mask)
+    gt = _to_numpy_binary(gt_mask)
+    pred_labels, n_pred = _label_instances(pred)
+    gt_labels, n_gt = _label_instances(gt)
+
+    merges = 0
+    for lab in range(1, pred_labels.max() + 1):
+        coords = (pred_labels == lab)
+        overlapping_gts = np.unique(gt_labels[coords])
+        overlapping_gts = overlapping_gts[overlapping_gts > 0]
+        if overlapping_gts.size >= 2:
+            merges += 1
+    denom = max(n_gt + n_pred, 1)
+    return (2.0 * merges) / denom
+
+
+def compute_centroid_prf(pred_mask, gt_mask):
+    """
+    Centroid-based precision/recall/F1.
+    - A predicted instance is correct if its centroid lies inside any GT instance.
+    - Recall counts GT instances that contain at least one predicted centroid.
+    """
+    pred = _to_numpy_binary(pred_mask)
+    gt = _to_numpy_binary(gt_mask)
+    pred_labels, n_pred = _label_instances(pred)
+    gt_labels, n_gt = _label_instances(gt)
+
+    # Centroids of predictions
+    pred_centroids = _component_centroids(pred_labels)
+
+    # Map centroid correctness
+    tp = 0
+    matched_gt_labels = set()
+    for (cy, cx) in pred_centroids:
+        y = int(round(cy))
+        x = int(round(cx))
+        if 0 <= y < gt_labels.shape[0] and 0 <= x < gt_labels.shape[1]:
+            lab = gt_labels[y, x]
+            if lab > 0:
+                tp += 1
+                matched_gt_labels.add(int(lab))
+
+    fp = max(n_pred - tp, 0)
+    fn = max(n_gt - len(matched_gt_labels), 0)
+
+    precision = tp / (tp + fp + 1e-6)
+    recall = tp / (tp + fn + 1e-6)
+    f1 = 2 * precision * recall / (precision + recall + 1e-6)
+    return precision, recall, f1
+
+
+def compute_all_metrics(pred_mask, gt_mask):
+    """
+    Convenience wrapper returning all requested metrics.
+    """
+    base = compute_metrics(pred_mask, gt_mask)
+    base['merge_rate'] = compute_merge_rate(pred_mask, gt_mask)
+    cprec, crec, cf1 = compute_centroid_prf(pred_mask, gt_mask)
+    base['centroid_precision'] = cprec
+    base['centroid_recall'] = crec
+    base['centroid_f1'] = cf1
+    return base
 
 
 def compute_metrics_batch(pred_masks, gt_masks):
