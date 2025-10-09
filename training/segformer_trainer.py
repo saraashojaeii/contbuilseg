@@ -9,7 +9,7 @@ from tqdm import tqdm
 import numpy as np
 import time
 import wandb
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as pltis 
 
 from .train import BaseTrainer
 from utils.losses import BCEWithDiceLoss, BCEWithLogitsDiceLoss, L1Loss, MergeSeparationLoss
@@ -40,13 +40,16 @@ class SegFormerTrainer(BaseTrainer):
             wandb_run_name: Optional W&B run name
             dataset_name: Dataset name for logging context
         """
-        super().__init__(model, train_loader, val_loader, device, learning_rate, model_save_dir)
+        # Set attributes needed by _get_loss_fn BEFORE calling BaseTrainer.__init__
         self.use_wandb = use_wandb
         self.dataset_name = dataset_name
         self.mask_weight = mask_weight
         self.contour_weight = contour_weight
         self.merge_weight = merge_weight
         self.merge_boundary_width = merge_boundary_width
+        
+        # Now call BaseTrainer initializer (which invokes _get_loss_fn)
+        super().__init__(model, train_loader, val_loader, device, learning_rate, model_save_dir)
 
         if self.use_wandb:
             wandb.init(
