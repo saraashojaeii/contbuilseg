@@ -313,8 +313,9 @@ class SegFormerTrainer(BaseTrainer):
                             plt.close(fig)
 
                         wandb.log({'val/predictions': wandb_imgs, 'epoch': epoch})
-                    except Exception:
-                        pass
+                        print(f"Logged {len(wandb_imgs)} validation visualizations to wandb")
+                    except Exception as e:
+                        print(f"Warning: Failed to log validation visualizations to wandb: {e}")
                     val_visual_logged = True
         
         # Calculate average loss and metrics
