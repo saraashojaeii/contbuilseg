@@ -224,9 +224,12 @@ class SegFormerTrainer(BaseTrainer):
         # Accumulators for metrics
         sum_metrics = { 'iou': 0.0, 'dice': 0.0, 'precision': 0.0, 'recall': 0.0, 'f1': 0.0 }
         pbar = tqdm(self.val_loader, desc=f"Epoch {epoch} [Val]")
-        val_visual_logged = False
+        
+        # Store first batch for visualization
+        first_batch_data = None
+        
         with torch.no_grad():
-            for batch in pbar:
+            for batch_idx, batch in enumerate(pbar):
                 pixel_values = batch['pixel_values'].to(self.device)
                 masks = batch['mask'].to(self.device)
                 contours = batch.get('contours')
@@ -265,64 +268,26 @@ class SegFormerTrainer(BaseTrainer):
 
                 pbar.set_postfix({'loss': loss.item(), 'merge': merge_loss.item(), 'iou': metrics['iou']})
 
-                if self.use_wandb and not val_visual_logged:
-                    try:
-                        imgs = pixel_values[:4].detach().cpu()
-                        preds = mask_pred[:4].detach().cpu()
-                        gts = masks[:4].detach().cpu()
-
-                        wandb_imgs = []
-                        for i in range(imgs.shape[0]):
-                            img = imgs[i]
-                            if img.shape[0] in (1, 3):
-                                np_img = img.numpy()
-                                if np_img.shape[0] == 1:
-                                    np_img = np_img[0]
-                                else:
-                                    np_img = np.transpose(np_img, (1, 2, 0))
-                                np_min, np_max = np_img.min(), np_img.max()
-                                if np_max > np_min:
-                                    np_img = (np_img - np_min) / (np_max - np_min)
-                                np_img = (np_img * 255).astype(np.uint8)
-                            else:
-                                np_img = imgs[i, :3].numpy()
-                                np_img = np.transpose(np_img, (1, 2, 0))
-                                np_min, np_max = np_img.min(), np_img.max()
-                                if np_max > np_min:
-                                    np_img = (np_img - np_min) / (np_max - np_min)
-                                np_img = (np_img * 255).astype(np.uint8)
-
-                            if contours is not None:
-                                cont_gt = contours[:4].detach().cpu()
-                                cont_pred = contour_map[:4].detach().cpu()
-                                fig, axes = plt.subplots(2, 3, figsize=(12, 8))
-                                axes[0,0].imshow(np_img, cmap='gray' if np_img.ndim==2 else None); axes[0,0].set_title('Input'); axes[0,0].axis('off')
-                                axes[0,1].imshow(gts[i].squeeze(), cmap='Blues'); axes[0,1].set_title('Mask GT'); axes[0,1].axis('off')
-                                axes[0,2].imshow(preds[i].squeeze(), cmap='Blues'); axes[0,2].set_title('Mask Pred'); axes[0,2].axis('off')
-                                axes[1,1].imshow(cont_gt[i].squeeze(), cmap='Reds'); axes[1,1].set_title('Contour GT'); axes[1,1].axis('off')
-                                axes[1,2].imshow(cont_pred[i].squeeze(), cmap='Reds'); axes[1,2].set_title('Contour Pred'); axes[1,2].axis('off')
-                                axes[1,0].axis('off')
-                            else:
-                                fig, axes = plt.subplots(1, 3, figsize=(12, 4))
-                                axes[0].imshow(np_img, cmap='gray' if np_img.ndim==2 else None); axes[0].set_title('Input'); axes[0].axis('off')
-                                axes[1].imshow(gts[i].squeeze(), cmap='Blues'); axes[1].set_title('Mask GT'); axes[1].axis('off')
-                                axes[2].imshow(preds[i].squeeze(), cmap='Blues'); axes[2].set_title('Mask Pred'); axes[2].axis('off')
-
-                            plt.tight_layout()
-                            wandb_imgs.append(wandb.Image(fig, caption=f'Sample {i+1}'))
-                            plt.close(fig)
-
-                        wandb.log({'val/predictions': wandb_imgs, 'epoch': epoch})
-                        print(f"Logged {len(wandb_imgs)} validation visualizations to wandb")
-                    except Exception as e:
-                        print(f"Warning: Failed to log validation visualizations to wandb: {e}")
-                    val_visual_logged = True
+                # Store first batch for visualization later
+                if batch_idx == 0 and self.use_wandb:
+                    first_batch_data = {
+                        'pixel_values': pixel_values[:4].detach().cpu(),
+                        'masks': masks[:4].detach().cpu(),
+                        'mask_pred': mask_pred[:4].detach().cpu(),
+                        'contours': contours[:4].detach().cpu() if contours is not None else None,
+                        'contour_map': contour_map[:4].detach().cpu() if contour_map is not None else None
+                    }
         
         # Calculate average loss and metrics
         avg_loss = running_loss / len(self.val_loader)
         # Average metrics over validation set
         avg_metrics = {k: (v / len(self.val_loader)) for k, v in sum_metrics.items()}
+        
+        # Log validation metrics and visualizations
         if self.use_wandb:
+            print(f"Logging validation results to wandb (use_wandb={self.use_wandb})...")
+            
+            # Log metrics
             wandb.log({
                 'val/epoch_loss': avg_loss,
                 'val/iou': avg_metrics['iou'],
@@ -332,6 +297,64 @@ class SegFormerTrainer(BaseTrainer):
                 'val/f1': avg_metrics['f1'],
                 'epoch': epoch
             })
+            
+            # Log visualizations if we have data
+            if first_batch_data is not None:
+                try:
+                    imgs = first_batch_data['pixel_values']
+                    preds = first_batch_data['mask_pred']
+                    gts = first_batch_data['masks']
+                    contours = first_batch_data['contours']
+                    contour_map = first_batch_data['contour_map']
+
+                    wandb_imgs = []
+                    for i in range(imgs.shape[0]):
+                        img = imgs[i]
+                        if img.shape[0] in (1, 3):
+                            np_img = img.numpy()
+                            if np_img.shape[0] == 1:
+                                np_img = np_img[0]
+                            else:
+                                np_img = np.transpose(np_img, (1, 2, 0))
+                            np_min, np_max = np_img.min(), np_img.max()
+                            if np_max > np_min:
+                                np_img = (np_img - np_min) / (np_max - np_min)
+                            np_img = (np_img * 255).astype(np.uint8)
+                        else:
+                            np_img = imgs[i, :3].numpy()
+                            np_img = np.transpose(np_img, (1, 2, 0))
+                            np_min, np_max = np_img.min(), np_img.max()
+                            if np_max > np_min:
+                                np_img = (np_img - np_min) / (np_max - np_min)
+                            np_img = (np_img * 255).astype(np.uint8)
+
+                        if contours is not None and contour_map is not None:
+                            fig, axes = plt.subplots(2, 3, figsize=(12, 8))
+                            axes[0,0].imshow(np_img, cmap='gray' if np_img.ndim==2 else None); axes[0,0].set_title('Input'); axes[0,0].axis('off')
+                            axes[0,1].imshow(gts[i].squeeze(), cmap='Blues'); axes[0,1].set_title('Mask GT'); axes[0,1].axis('off')
+                            axes[0,2].imshow(preds[i].squeeze(), cmap='Blues'); axes[0,2].set_title('Mask Pred'); axes[0,2].axis('off')
+                            axes[1,1].imshow(contours[i].squeeze(), cmap='Reds'); axes[1,1].set_title('Contour GT'); axes[1,1].axis('off')
+                            axes[1,2].imshow(contour_map[i].squeeze(), cmap='Reds'); axes[1,2].set_title('Contour Pred'); axes[1,2].axis('off')
+                            axes[1,0].axis('off')
+                        else:
+                            fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+                            axes[0].imshow(np_img, cmap='gray' if np_img.ndim==2 else None); axes[0].set_title('Input'); axes[0].axis('off')
+                            axes[1].imshow(gts[i].squeeze(), cmap='Blues'); axes[1].set_title('Mask GT'); axes[1].axis('off')
+                            axes[2].imshow(preds[i].squeeze(), cmap='Blues'); axes[2].set_title('Mask Pred'); axes[2].axis('off')
+
+                        plt.tight_layout()
+                        wandb_imgs.append(wandb.Image(fig, caption=f'Sample {i+1}'))
+                        plt.close(fig)
+
+                    wandb.log({'val/predictions': wandb_imgs, 'epoch': epoch})
+                    print(f"✓ Logged {len(wandb_imgs)} validation visualizations to wandb")
+                except Exception as e:
+                    print(f"✗ Warning: Failed to log validation visualizations to wandb: {e}")
+                    import traceback
+                    traceback.print_exc()
+            else:
+                print("✗ No validation batch data available for visualization")
+        
         return avg_loss, avg_metrics
     
     def save_model(self, epoch, final=False):
