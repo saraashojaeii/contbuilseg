@@ -66,9 +66,9 @@ def parse_args():
                         help="Save model every N epochs")
     parser.add_argument("--mask_weight", type=float, default=0.7,
                         help="Weight for mask loss")
-    parser.add_argument("--contour_weight", type=float, default=0.3,
+    parser.add_argument("--contour_weight", type=float, default=0.2,
                         help="Weight for contour loss")
-    parser.add_argument("--merge_weight", type=float, default=0.0,
+    parser.add_argument("--merge_weight", type=float, default=0.1,
                         help="Weight for merge separation loss (proxy for merge rate)")
     parser.add_argument("--merge_boundary_width", type=int, default=1,
                         help="Boundary width (pixels) used by merge separation loss")
