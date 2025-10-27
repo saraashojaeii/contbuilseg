@@ -9,7 +9,7 @@ from tqdm import tqdm
 import numpy as np
 import time
 import wandb
-import matplotlib.pyplot as pltis 
+import matplotlib.pyplot as plt 
 
 from .train import BaseTrainer
 from utils.losses import BCEWithDiceLoss, BCEWithLogitsDiceLoss, L1Loss, MergeSeparationLoss
@@ -120,10 +120,31 @@ class SegFormerTrainer(BaseTrainer):
         running_loss = 0.0
         running_mask_loss = 0.0
         running_contour_loss = 0.0
+        running_merge_loss = 0.0
         step = 0
+        
+        # Initialize metrics tracking for training
+        train_metrics = {
+            'iou': 0.0,
+            'dice': 0.0,
+            'precision': 0.0,
+            'recall': 0.0,
+            'f1': 0.0,
+            'accuracy': 0.0
+        }
+        
+        train_contour_metrics = {
+            'iou': 0.0,
+            'dice': 0.0,
+            'precision': 0.0,
+            'recall': 0.0,
+            'f1': 0.0,
+            'accuracy': 0.0
+        }
+        
+        has_contours = False
         pbar = tqdm(self.train_loader, desc=f"Epoch {epoch} [Train]")
 
-        running_merge_loss = 0.0
         for batch in pbar:
             pixel_values = batch['pixel_values'].to(self.device)
             masks = batch['mask'].to(self.device)
@@ -171,6 +192,15 @@ class SegFormerTrainer(BaseTrainer):
             # Metrics
             with torch.no_grad():
                 batch_metrics = compute_metrics_batch(mask_pred, masks)
+                for k, v in batch_metrics.items():
+                    train_metrics[k] += v
+                
+                # Calculate metrics for contour if available
+                if contours is not None:
+                    batch_contour_metrics = compute_metrics_batch(contour_map, contours)
+                    for k, v in batch_contour_metrics.items():
+                        train_contour_metrics[k] += v
+                    has_contours = True
 
             pbar.set_postfix({
                 'loss': loss.item(),
@@ -193,20 +223,43 @@ class SegFormerTrainer(BaseTrainer):
                 wandb.log(log)
             step += 1
         
-        # Calculate average loss
+        # Calculate average loss and metrics
         avg_loss = running_loss / len(self.train_loader)
         avg_mask_loss = running_mask_loss / len(self.train_loader)
+        
+        # Average the metrics
+        for k in train_metrics:
+            train_metrics[k] /= len(self.train_loader)
+        
+        if has_contours:
+            for k in train_contour_metrics:
+                train_contour_metrics[k] /= len(self.train_loader)
+        
+        # Log epoch-level training metrics to wandb
         if self.use_wandb:
-            log = {
+            log_dict = {
                 'train/epoch_loss': avg_loss,
                 'train/epoch_mask_loss': avg_mask_loss,
+                'train/iou': train_metrics['iou'],
+                'train/dice': train_metrics['dice'],
+                'train/precision': train_metrics['precision'],
+                'train/recall': train_metrics['recall'],
+                'train/f1': train_metrics['f1'],
                 'epoch': epoch
             }
             if running_contour_loss > 0:
-                log['train/epoch_contour_loss'] = running_contour_loss / len(self.train_loader)
-            if 'running_merge_loss' in locals():
-                log['train/epoch_merge_loss'] = running_merge_loss / len(self.train_loader)
-            wandb.log(log)
+                avg_contour_loss = running_contour_loss / len(self.train_loader)
+                log_dict['train/epoch_contour_loss'] = avg_contour_loss
+                log_dict['train/contour_iou'] = train_contour_metrics['iou']
+                log_dict['train/contour_dice'] = train_contour_metrics['dice']
+                log_dict['train/contour_precision'] = train_contour_metrics['precision']
+                log_dict['train/contour_recall'] = train_contour_metrics['recall']
+                log_dict['train/contour_f1'] = train_contour_metrics['f1']
+            if running_merge_loss > 0:
+                avg_merge_loss = running_merge_loss / len(self.train_loader)
+                log_dict['train/epoch_merge_loss'] = avg_merge_loss
+            wandb.log(log_dict)
+        
         return avg_loss
     
     def _validate_epoch(self, epoch):
@@ -221,8 +274,11 @@ class SegFormerTrainer(BaseTrainer):
         """
         self.model.eval()
         running_loss = 0.0
+        running_merge_loss = 0.0
         # Accumulators for metrics
-        sum_metrics = { 'iou': 0.0, 'dice': 0.0, 'precision': 0.0, 'recall': 0.0, 'f1': 0.0 }
+        sum_metrics = { 'iou': 0.0, 'dice': 0.0, 'precision': 0.0, 'recall': 0.0, 'f1': 0.0, 'accuracy': 0.0 }
+        contour_metrics = { 'iou': 0.0, 'dice': 0.0, 'precision': 0.0, 'recall': 0.0, 'f1': 0.0, 'accuracy': 0.0 }
+        has_contours = False
         pbar = tqdm(self.val_loader, desc=f"Epoch {epoch} [Val]")
         
         # Store first batch for visualization
@@ -264,7 +320,16 @@ class SegFormerTrainer(BaseTrainer):
                 # accumulate
                 for k in sum_metrics:
                     sum_metrics[k] += metrics[k]
+                
+                # Calculate contour metrics if available
+                if contours is not None and contour_map is not None:
+                    batch_contour_metrics = compute_metrics_batch(contour_map, contours)
+                    for k in contour_metrics:
+                        contour_metrics[k] += batch_contour_metrics[k]
+                    has_contours = True
+                
                 running_loss += loss.item()
+                running_merge_loss += merge_loss.item()
 
                 pbar.set_postfix({'loss': loss.item(), 'merge': merge_loss.item(), 'iou': metrics['iou']})
 
@@ -282,13 +347,17 @@ class SegFormerTrainer(BaseTrainer):
         avg_loss = running_loss / len(self.val_loader)
         # Average metrics over validation set
         avg_metrics = {k: (v / len(self.val_loader)) for k, v in sum_metrics.items()}
+        if has_contours:
+            for k in contour_metrics:
+                contour_metrics[k] /= len(self.val_loader)
+            avg_metrics.update({f'contour_{k}': v for k, v in contour_metrics.items()})
         
         # Log validation metrics and visualizations
         if self.use_wandb:
             print(f"Logging validation results to wandb (use_wandb={self.use_wandb})...")
             
             # Log metrics
-            wandb.log({
+            val_log = {
                 'val/epoch_loss': avg_loss,
                 'val/iou': avg_metrics['iou'],
                 'val/dice': avg_metrics['dice'],
@@ -296,7 +365,18 @@ class SegFormerTrainer(BaseTrainer):
                 'val/recall': avg_metrics['recall'],
                 'val/f1': avg_metrics['f1'],
                 'epoch': epoch
-            })
+            }
+            if running_merge_loss > 0:
+                val_log['val/epoch_merge_loss'] = running_merge_loss / len(self.val_loader)
+            if has_contours:
+                val_log.update({
+                    'val/contour_iou': avg_metrics.get('contour_iou', 0.0),
+                    'val/contour_dice': avg_metrics.get('contour_dice', 0.0),
+                    'val/contour_precision': avg_metrics.get('contour_precision', 0.0),
+                    'val/contour_recall': avg_metrics.get('contour_recall', 0.0),
+                    'val/contour_f1': avg_metrics.get('contour_f1', 0.0)
+                })
+            wandb.log(val_log)
             
             # Log visualizations if we have data
             if first_batch_data is not None:
