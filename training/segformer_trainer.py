@@ -439,29 +439,20 @@ class SegFormerTrainer(BaseTrainer):
     
     def save_model(self, epoch, final=False):
         """
-        Save SegFormer model using the Hugging Face save_pretrained method.
+        Save SegFormer model weights as .pth file.
         
         Args:
             epoch: Current epoch number
             final: Whether this is the final model after training
         """
         if final:
-            save_path = f"{self.model_save_dir}/final_model"
+            save_path = f"{self.model_save_dir}/final_model.pth"
         else:
-            save_path = f"{self.model_save_dir}/epoch_{epoch}"
+            save_path = f"{self.model_save_dir}/epoch_{epoch}.pth"
 
-        # Support either HF SegformerForSemanticSegmentation or our DualHeadSegFormer with .backbone
-        try:
-            if hasattr(self.model, 'save_pretrained'):
-                self.model.save_pretrained(save_path)
-            elif hasattr(self.model, 'backbone') and hasattr(self.model.backbone, 'save_pretrained'):
-                self.model.backbone.save_pretrained(save_path)
-            else:
-                # Fallback to state_dict
-                import torch
-                torch.save(self.model.state_dict(), f"{save_path}.pt")
-        finally:
-            print(f"Model saved to {save_path}")
+        # Save model state_dict as .pth file
+        torch.save(self.model.state_dict(), save_path)
+        print(f"Model weights saved to {save_path}")
     
     def load_checkpoint(self, checkpoint_path):
         """
