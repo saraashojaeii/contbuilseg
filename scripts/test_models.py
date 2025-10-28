@@ -25,6 +25,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from torchvision import transforms
+from tqdm import tqdm
 
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -86,13 +87,11 @@ def test_unet(args, paths):
     state = ckpt['model_state_dict'] if isinstance(ckpt, dict) and 'model_state_dict' in ckpt else ckpt
     model.load_state_dict(state)
     model.to(args.device)
-    model.eval()
-
     import pandas as pd
     rows = []
     with torch.no_grad():
         idx = 0
-        for batch in loader:
+        for batch in tqdm(loader, desc='Testing UNet'):
             images, masks = batch
             images = images.to(args.device)
             masks = masks.to(args.device)
@@ -100,11 +99,12 @@ def test_unet(args, paths):
             mask_pred = outputs[0] if isinstance(outputs, tuple) else outputs
             mask_pred = upsample_like(mask_pred, masks)
 
-            # compute metrics on CPU numpy via helper
-            m = compute_all_metrics(mask_pred.cpu(), masks.cpu())
-            m['sample_idx'] = idx
-            rows.append(m)
-            idx += 1
+            # compute metrics per sample in batch
+            for i in range(mask_pred.shape[0]):
+                m = compute_all_metrics(mask_pred[i:i+1].cpu(), masks[i:i+1].cpu())
+                m['sample_idx'] = idx
+                rows.append(m)
+                idx += 1
 
     df = pd.DataFrame(rows)
     df.to_csv(os.path.join(args.output_dir, f'unet_{args.dataset_name}_{args.split}.csv'), index=False)
@@ -137,17 +137,19 @@ def _test_generic_dual_head(args, paths, get_model_fn, model_name: str):
     rows = []
     with torch.no_grad():
         idx = 0
-        for batch in loader:
+        for batch in tqdm(loader, desc=f'Testing {model_name}'):
             images, masks = batch
             images = images.to(args.device)
             masks = masks.to(args.device)
             outputs = model(images)
             mask_pred = outputs[0] if isinstance(outputs, tuple) else outputs
             mask_pred = upsample_like(mask_pred, masks)
-            m = compute_all_metrics(mask_pred.cpu(), masks.cpu())
-            m['sample_idx'] = idx
-            rows.append(m)
-            idx += 1
+            # compute metrics per sample in batch
+            for i in range(mask_pred.shape[0]):
+                m = compute_all_metrics(mask_pred[i:i+1].cpu(), masks[i:i+1].cpu())
+                m['sample_idx'] = idx
+                rows.append(m)
+                idx += 1
 
     df = pd.DataFrame(rows)
     df.to_csv(os.path.join(args.output_dir, f'{model_name}_{args.dataset_name}_{args.split}.csv'), index=False)
@@ -214,7 +216,7 @@ def test_segformer(args, paths):
     rows = []
     with torch.no_grad():
         idx = 0
-        for batch in loader:
+        for batch in tqdm(loader, desc='Testing SegFormer'):
             pixel_values = batch['pixel_values'].to(args.device)
             masks = batch['mask'].to(args.device)
             if use_wrapper:
@@ -225,10 +227,12 @@ def test_segformer(args, paths):
             logits = upsample_like(logits, masks)
             probs = torch.sigmoid(logits)
 
-            m = compute_all_metrics(probs.cpu(), masks.cpu())
-            m['sample_idx'] = idx
-            rows.append(m)
-            idx += 1
+            # compute metrics per sample in batch
+            for i in range(probs.shape[0]):
+                m = compute_all_metrics(probs[i:i+1].cpu(), masks[i:i+1].cpu())
+                m['sample_idx'] = idx
+                rows.append(m)
+                idx += 1
 
     df = pd.DataFrame(rows)
     df.to_csv(os.path.join(args.output_dir, f'segformer_{args.dataset_name}_{args.split}.csv'), index=False)
