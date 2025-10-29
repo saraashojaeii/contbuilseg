@@ -62,6 +62,8 @@ def parse_args():
                         help="Directory to save outputs")
     parser.add_argument("--model_save_dir", type=str, default="/root/home/pvc/conbuildseg_results/checkpoints/segformer",
                         help="Directory to save model checkpoints")
+
+    parser.add_argument('--num_workers', type=int, default=1)
     
     # Device settings
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu",
