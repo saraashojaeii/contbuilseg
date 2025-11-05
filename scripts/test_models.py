@@ -37,7 +37,7 @@ from evaluation.metrics import compute_all_metrics
 
 def parse_args():
     p = argparse.ArgumentParser(description="Test segmentation models and report advanced metrics")
-    p.add_argument('--model_type', choices=['unet', 'hrnet', 'deeplabv3plus', 'swin_unet', 'mask2former', 'segformer'], required=True)
+    p.add_argument('--model_type', choices=['unet', 'hrnet', 'deeplabv3plus', 'swin_unet', 'mask2former', 'segformer', 'buildformer'], required=True)
     p.add_argument('--checkpoint', type=str, required=True, help='Path to .pth (UNet/dual-head) or HF dir (SegFormer)')
     p.add_argument('--data_dir', type=str, required=True, help='Root datasets directory')
     p.add_argument('--dataset_name', type=str, required=True, help='Dataset folder name under data_dir')
@@ -261,6 +261,54 @@ def test_segformer(args, paths):
         print(f'{k}: {v:.4f}')
 
 
+def test_buildformer(args, paths):
+    from models.buildformer import DualHeadBuildFormer
+    os.makedirs(args.output_dir, exist_ok=True)
+
+    # BuildFormer uses standard dataset, not HF processor
+    transform = transforms.Compose([transforms.ToTensor()])
+    dataset = CustomDataset(paths['images'], paths['masks'], transform=transform)
+    loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
+
+    # Load BuildFormer model
+    model = DualHeadBuildFormer(num_labels=1)
+    ckpt = torch.load(args.checkpoint, map_location='cpu')
+    state = ckpt.get('model_state_dict', ckpt) if isinstance(ckpt, dict) else ckpt
+    model.load_state_dict(state)
+    model.to(args.device)
+    model.eval()
+
+    import pandas as pd
+    rows = []
+    with torch.no_grad():
+        idx = 0
+        for batch in tqdm(loader, desc='Testing BuildFormer'):
+            images, masks = batch
+            images = images.to(args.device)
+            masks = masks.to(args.device)
+            
+            with autocast(enabled=bool(args.use_amp and (str(args.device).startswith('cuda') and torch.cuda.is_available()))):
+                logits, _ = model(images)
+            
+            logits = upsample_like(logits, masks)
+            probs = torch.sigmoid(logits)
+
+            # compute metrics per sample in batch
+            for i in range(probs.shape[0]):
+                m = compute_all_metrics(probs[i:i+1].cpu(), masks[i:i+1].cpu())
+                m['sample_idx'] = idx
+                rows.append(m)
+                idx += 1
+
+    df = pd.DataFrame(rows)
+    df.to_csv(os.path.join(args.output_dir, f'buildformer_{args.dataset_name}_{args.split}.csv'), index=False)
+
+    avg = df.drop(columns=['sample_idx'], errors='ignore').mean().to_dict()
+    print('\nAverages (BuildFormer):')
+    for k, v in avg.items():
+        print(f'{k}: {v:.4f}')
+
+
 
 def main():
     args = parse_args()
@@ -283,6 +331,8 @@ def main():
         test_mask2former(args, paths)
     elif args.model_type == 'segformer':
         test_segformer(args, paths)
+    elif args.model_type == 'buildformer':
+        test_buildformer(args, paths)
 
 
 if __name__ == '__main__':
