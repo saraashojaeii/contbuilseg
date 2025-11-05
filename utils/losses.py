@@ -243,16 +243,19 @@ class MergeSeparationLoss(nn.Module):
         with torch.no_grad():
             xmin = x.min().item()
             xmax = x.max().item()
-        if xmin < 0.0 or xmax > 1.0:
-            probs = torch.sigmoid(x)
-        else:
-            probs = x
         boundary = self._make_boundary_mask(targets)
 
         # Create target zeros on boundary pixels; ignore elsewhere
-        # BCE on boundary pixels only
-        bce = F.binary_cross_entropy(probs, torch.zeros_like(probs), reduction='none')
-        masked = bce * boundary
+        # Prefer logits-safe BCE under AMP when input is logits
+        if xmin < 0.0 or xmax > 1.0:
+            # logits path (safe for autocast)
+            bce = F.binary_cross_entropy_with_logits(x, torch.zeros_like(x), reduction='none')
+            masked = bce * boundary
+        else:
+            # probability path (avoid numerical issues if not in AMP path)
+            probs = torch.clamp(x, 0.0, 1.0)
+            bce = F.binary_cross_entropy(probs, torch.zeros_like(probs), reduction='none')
+            masked = bce * boundary
         denom = boundary.sum() + self.eps
         return masked.sum() / denom
 
