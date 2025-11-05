@@ -108,41 +108,29 @@ class CustomDataset(Dataset):
         image = Image.open(self.image_paths[idx]).convert('RGB')
         mask = Image.open(self.label1_paths[idx]).convert('L')
         
+        # Apply transform to image only
         if self.transform:
             image = self.transform(image)
-            # Convert mask to tensor and normalize to [0, 1]
-            mask_np = np.array(mask, dtype=np.float32)
-            # Normalize to [0, 1] if needed
-            if mask_np.max() > 1.0:
-                mask_np = mask_np / 255.0
-            mask = torch.from_numpy(mask_np).unsqueeze(0)  # Add channel dimension
-            # Clamp to ensure [0, 1] range
-            mask = torch.clamp(mask, 0.0, 1.0)
-        else:
-            # If no transform, still ensure proper format
-            mask_np = np.array(mask, dtype=np.float32)
-            if mask_np.max() > 1.0:
-                mask_np = mask_np / 255.0
-            mask = torch.from_numpy(mask_np).unsqueeze(0)
-            mask = torch.clamp(mask, 0.0, 1.0)
+        
+        # Always manually handle mask normalization (don't use transform on masks)
+        mask_np = np.array(mask, dtype=np.float32)
+        # Normalize to [0, 1] if needed
+        if mask_np.max() > 1.0:
+            mask_np = mask_np / 255.0
+        mask = torch.from_numpy(mask_np).unsqueeze(0)  # Add channel dimension
+        # Clamp to ensure [0, 1] range
+        mask = torch.clamp(mask, 0.0, 1.0)
             
         if self.label2_paths is None:
             return image, mask
             
         contour = Image.open(self.label2_paths[idx]).convert('L')
-        if self.transform:
-            # Convert contour to tensor and normalize
-            contour_np = np.array(contour, dtype=np.float32)
-            if contour_np.max() > 1.0:
-                contour_np = contour_np / 255.0
-            contour = torch.from_numpy(contour_np).unsqueeze(0)
-            contour = torch.clamp(contour, 0.0, 1.0)
-        else:
-            contour_np = np.array(contour, dtype=np.float32)
-            if contour_np.max() > 1.0:
-                contour_np = contour_np / 255.0
-            contour = torch.from_numpy(contour_np).unsqueeze(0)
-            contour = torch.clamp(contour, 0.0, 1.0)
+        # Manually handle contour normalization
+        contour_np = np.array(contour, dtype=np.float32)
+        if contour_np.max() > 1.0:
+            contour_np = contour_np / 255.0
+        contour = torch.from_numpy(contour_np).unsqueeze(0)
+        contour = torch.clamp(contour, 0.0, 1.0)
             
         return image, mask, contour
 
