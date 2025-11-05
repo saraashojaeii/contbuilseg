@@ -348,6 +348,17 @@ class DualHeadBuildFormer(nn.Module):
 
     def forward(self, x):
         sz = x.size()[-2:]
+        
+        # Pad input to be divisible by 64 for BuildFormer's hierarchical architecture
+        # Total downsampling: stem(4x) + 3 stages(2x each) = 32x, plus window_size=16
+        h, w = x.shape[-2:]
+        pad_h = (64 - h % 64) % 64
+        pad_w = (64 - w % 64) % 64
+        if pad_h > 0 or pad_w > 0:
+            x = F.pad(x, (0, pad_w, 0, pad_h), mode='reflect')
+            # Debug: uncomment to see padding
+            # print(f"Padded from {sz} to {x.shape[-2:]}")
+        
         dp = self.dp(x)
         x0, x1, x2, x3 = self.backbone(x)
         x = self.fpn(x0, x1, x2, x3)
