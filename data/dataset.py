@@ -122,6 +122,119 @@ class CustomDataset(Dataset):
         return image, mask, contour
 
 
+class TiledDataPrep(Dataset):
+    """
+    Dataset that yields fixed-size tiles from large images and corresponding masks (and optional contours).
+    Useful for very large inputs like INRIA (e.g., 5000x5000) to avoid GPU OOM.
+    """
+    def __init__(
+        self,
+        image_paths: List[str],
+        label_paths1: List[str],
+        image_processor,
+        contour_paths: Optional[List[str]] = None,
+        tile_size: int = 512,
+        stride: Optional[int] = None,
+        processor_kwargs: Optional[Dict] = None,
+    ):
+        self.image_paths = image_paths
+        self.label1_paths = label_paths1
+        self.contour_paths = contour_paths
+        self.image_processor = image_processor
+        self.tile_size = tile_size
+        self.stride = stride or tile_size
+        # For tiles we do not resize by default; tiles already match model input
+        self.processor_kwargs = processor_kwargs or {'do_resize': False}
+
+        # Build tile index: list of (img_idx, y, x)
+        self._tiles = []
+        for i, img_path in enumerate(self.image_paths):
+            with Image.open(img_path) as im:
+                w, h = im.size
+            # compute grid with full coverage
+            y_positions = list(range(0, max(1, h - self.tile_size + 1), self.stride))
+            x_positions = list(range(0, max(1, w - self.tile_size + 1), self.stride))
+            if len(y_positions) == 0:
+                y_positions = [0]
+            if len(x_positions) == 0:
+                x_positions = [0]
+            if y_positions[-1] + self.tile_size < h:
+                y_positions.append(max(0, h - self.tile_size))
+            if x_positions[-1] + self.tile_size < w:
+                x_positions.append(max(0, w - self.tile_size))
+            for top in y_positions:
+                for left in x_positions:
+                    self._tiles.append((i, top, left))
+
+    def __len__(self) -> int:
+        return len(self._tiles)
+
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+        img_idx, top, left = self._tiles[idx]
+
+        image = Image.open(self.image_paths[img_idx]).convert('RGB')
+        mask_img = Image.open(self.label1_paths[img_idx]).convert('L')
+        contour_img = None
+        if self.contour_paths is not None:
+            contour_img = Image.open(self.contour_paths[img_idx]).convert('L')
+
+        # Crop tiles (pad if tile exceeds boundary)
+        tile_box = (left, top, left + self.tile_size, top + self.tile_size)
+        image_tile = self._crop_with_pad(image, tile_box)
+        mask_tile = self._crop_with_pad(mask_img, tile_box)
+        contour_tile = self._crop_with_pad(contour_img, tile_box) if contour_img is not None else None
+
+        # Process image
+        proc = self.image_processor(image_tile, return_tensors="pt", **self.processor_kwargs)
+        pixel_values = proc["pixel_values"].squeeze(0)  # CxHxW
+        target_h, target_w = pixel_values.shape[-2], pixel_values.shape[-1]
+
+        # Prepare mask (nearest to preserve labels)
+        mask_arr = np.array(mask_tile).astype(np.float32) / 255.0
+        mask_resized = Image.fromarray((mask_arr * 255).astype(np.uint8)).resize((target_w, target_h), resample=Image.NEAREST)
+        mask_tensor = torch.from_numpy(np.array(mask_resized).astype(np.float32) / 255.0).unsqueeze(0)
+
+        sample = {
+            'pixel_values': pixel_values,
+            'mask': mask_tensor,
+        }
+
+        if contour_tile is not None:
+            contour_arr = np.array(contour_tile).astype(np.float32) / 255.0
+            contour_resized = Image.fromarray((contour_arr * 255).astype(np.uint8)).resize((target_w, target_h), resample=Image.NEAREST)
+            contour_tensor = torch.from_numpy(np.array(contour_resized).astype(np.float32) / 255.0).unsqueeze(0)
+            sample['contours'] = contour_tensor
+
+        return sample
+
+    @staticmethod
+    def _crop_with_pad(img: Optional[Image.Image], box: tuple) -> Image.Image:
+        """Crop the region, padding with zeros if box exceeds image bounds."""
+        if img is None:
+            return None
+        left, top, right, bottom = box
+        w, h = img.size
+        # Compute intersection
+        inter_left = max(0, left)
+        inter_top = max(0, top)
+        inter_right = min(w, right)
+        inter_bottom = min(h, bottom)
+
+        crop = img.crop((inter_left, inter_top, inter_right, inter_bottom))
+        # If exact size, return
+        target_w = right - left
+        target_h = bottom - top
+        if crop.size == (target_w, target_h):
+            return crop
+
+        # Otherwise, paste into a black canvas
+        canvas = Image.new(img.mode, (target_w, target_h))
+        paste_x = inter_left - left
+        paste_y = inter_top - top
+        canvas.paste(crop, (paste_x, paste_y))
+        return canvas
+
+
 def find_files_with_extensions(directory: str, extensions: List[str]) -> List[str]:
     """
     Find files with any of the specified extensions in a directory.

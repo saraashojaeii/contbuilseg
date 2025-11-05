@@ -13,7 +13,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from models.segformer import get_segformer_model
-from data.dataset import DataPrep
+from data.dataset import DataPrep, TiledDataPrep
 from training.segformer_trainer import SegFormerTrainer
 
 
@@ -56,6 +56,7 @@ def parse_args():
                         help="Weight for merge separation loss (proxy for merge rate)")
     parser.add_argument("--merge_boundary_width", type=int, default=1,
                         help="Boundary width (pixels) used by merge separation loss")
+    parser.add_argument("--use_amp", action="store_true", help="Use mixed precision (AMP) for training")
     
     # Output paths
     parser.add_argument("--output_dir", type=str, default="/root/home/pvc/conbuildseg_results/",
@@ -64,6 +65,12 @@ def parse_args():
                         help="Directory to save model checkpoints")
 
     parser.add_argument('--num_workers', type=int, default=1)
+    # Large image tiling
+    parser.add_argument('--use_tiling', action='store_true', help='Enable tiling of large images')
+    parser.add_argument('--tile_size', type=int, default=512, help='Tile size (pixels) for tiling dataset')
+    parser.add_argument('--tile_stride', type=int, default=512, help='Stride (pixels) between tiles')
+    # CUDA allocator config
+    parser.add_argument('--max_split_size_mb', type=int, default=0, help='Set PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:<val> to reduce fragmentation (0 to skip)')
     
     # Device settings
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu",
@@ -102,6 +109,10 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
     os.makedirs(args.model_save_dir, exist_ok=True)
     
+    # Optional CUDA allocator tuning to help fragmentation
+    if args.max_split_size_mb and args.max_split_size_mb > 0:
+        os.environ['PYTORCH_CUDA_ALLOC_CONF'] = f"max_split_size_mb:{args.max_split_size_mb}"
+
     # Initialize SegFormer model
     chosen_model_name = args.model_name
     if chosen_model_name.strip().lower() == "segformer":
@@ -150,9 +161,24 @@ def main():
     print(f"Found {len(train_img_paths)} training images, {len(val_img_paths)} validation images, "
           f"and {len(test_img_paths)} test images")
     
-    # Create datasets
-    train_dataset = DataPrep(train_img_paths, train_mask_paths, image_processor, contour_paths=train_contour_paths)
-    val_dataset = DataPrep(val_img_paths, val_mask_paths, image_processor, contour_paths=val_contour_paths)
+    # Create datasets (use tiling if requested)
+    if args.use_tiling:
+        print(f"Using TiledDataPrep with tile_size={args.tile_size}, stride={args.tile_stride}")
+        train_dataset = TiledDataPrep(
+            train_img_paths, train_mask_paths, image_processor,
+            contour_paths=train_contour_paths,
+            tile_size=args.tile_size,
+            stride=args.tile_stride,
+        )
+        val_dataset = TiledDataPrep(
+            val_img_paths, val_mask_paths, image_processor,
+            contour_paths=val_contour_paths,
+            tile_size=args.tile_size,
+            stride=args.tile_stride,
+        )
+    else:
+        train_dataset = DataPrep(train_img_paths, train_mask_paths, image_processor, contour_paths=train_contour_paths)
+        val_dataset = DataPrep(val_img_paths, val_mask_paths, image_processor, contour_paths=val_contour_paths)
     
     # Create dataloaders
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
@@ -173,7 +199,8 @@ def main():
         mask_weight=args.mask_weight,
         contour_weight=args.contour_weight,
         merge_weight=args.merge_weight,
-        merge_boundary_width=args.merge_boundary_width
+        merge_boundary_width=args.merge_boundary_width,
+        use_amp=args.use_amp,
     )
     
     # Train model

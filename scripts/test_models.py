@@ -23,6 +23,7 @@ import argparse
 import glob
 import numpy as np
 import torch
+from torch.cuda.amp import autocast
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from tqdm import tqdm
@@ -30,7 +31,7 @@ from tqdm import tqdm
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from data.dataset import CustomDataset, DataPrep
+from data.dataset import CustomDataset, DataPrep, TiledDataPrep
 from evaluation.metrics import compute_all_metrics
 
 
@@ -49,6 +50,11 @@ def parse_args():
     p.add_argument('--height', type=int, default=512, help='Resize height when --resize used (SegFormer only)')
     p.add_argument('--width', type=int, default=512, help='Resize width when --resize used (SegFormer only)')
     p.add_argument('--model_name', type=str, default='nvidia/mit-b0', help='SegFormer HF id when loading .pth checkpoints')
+    # Large image handling for SegFormer
+    p.add_argument('--use_tiling', action='store_true', help='Enable tiling for large images (SegFormer only)')
+    p.add_argument('--tile_size', type=int, default=512, help='Tile size for tiling dataset (SegFormer only)')
+    p.add_argument('--tile_stride', type=int, default=512, help='Stride for tiling dataset (SegFormer only)')
+    p.add_argument('--use_amp', action='store_true', help='Use mixed precision during inference (SegFormer only)')
     return p.parse_args()
 
 
@@ -206,7 +212,18 @@ def test_segformer(args, paths):
     if args.resize:
         proc_kwargs['size'] = {'height': args.height, 'width': args.width}
 
-    dataset = DataPrep(paths['images'], paths['masks'], processor, processor_kwargs=proc_kwargs)
+    # Choose dataset (tiling vs full image)
+    if args.use_tiling:
+        print(f"Using TiledDataPrep for testing: tile_size={args.tile_size}, stride={args.tile_stride}")
+        dataset = TiledDataPrep(
+            paths['images'], paths['masks'], processor,
+            contour_paths=None,
+            tile_size=args.tile_size,
+            stride=args.tile_stride,
+            processor_kwargs=proc_kwargs,
+        )
+    else:
+        dataset = DataPrep(paths['images'], paths['masks'], processor, processor_kwargs=proc_kwargs)
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
     model.to(args.device)
@@ -219,11 +236,12 @@ def test_segformer(args, paths):
         for batch in tqdm(loader, desc='Testing SegFormer'):
             pixel_values = batch['pixel_values'].to(args.device)
             masks = batch['mask'].to(args.device)
-            if use_wrapper:
-                logits, _ = model(pixel_values)
-            else:
-                outputs = model(pixel_values=pixel_values)
-                logits = outputs.logits
+            with autocast(enabled=bool(args.use_amp and (str(args.device).startswith('cuda') and torch.cuda.is_available()))):
+                if use_wrapper:
+                    logits, _ = model(pixel_values)
+                else:
+                    outputs = model(pixel_values=pixel_values)
+                    logits = outputs.logits
             logits = upsample_like(logits, masks)
             probs = torch.sigmoid(logits)
 

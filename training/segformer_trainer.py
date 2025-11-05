@@ -5,6 +5,7 @@ SegFormer trainer for building segmentation tasks.
 import torch
 import torch.nn as nn
 from torch.optim import AdamW
+from torch.cuda.amp import autocast, GradScaler
 from tqdm import tqdm
 import numpy as np
 import time
@@ -24,7 +25,8 @@ class SegFormerTrainer(BaseTrainer):
                 learning_rate=2e-5, model_save_dir='./checkpoints',
                 use_wandb=True, wandb_project='building_seg', wandb_run_name=None,
                 dataset_name='dataset', mask_weight=0.7, contour_weight=0.3,
-                merge_weight=0.0, merge_boundary_width: int = 1):
+                merge_weight=0.0, merge_boundary_width: int = 1,
+                use_amp: bool = True):
         """
         Initialize the SegFormerTrainer.
         
@@ -50,6 +52,10 @@ class SegFormerTrainer(BaseTrainer):
         
         # Now call BaseTrainer initializer (which invokes _get_loss_fn)
         super().__init__(model, train_loader, val_loader, device, learning_rate, model_save_dir)
+
+        # AMP setup
+        self.use_amp = bool(use_amp and (str(device).startswith('cuda') and torch.cuda.is_available()))
+        self.scaler = GradScaler(enabled=self.use_amp)
 
         if self.use_wandb:
             wandb.init(
@@ -152,36 +158,43 @@ class SegFormerTrainer(BaseTrainer):
             if contours is not None:
                 contours = contours.to(self.device)
 
-            self.optimizer.zero_grad()
+            self.optimizer.zero_grad(set_to_none=True)
 
-            mask_logits, contour_map = self.model(pixel_values)
-            # Align predictions to GT spatial size if needed
-            if mask_logits.shape[-2:] != masks.shape[-2:]:
-                mask_logits = torch.nn.functional.interpolate(
-                    mask_logits, size=masks.shape[-2:], mode='bilinear', align_corners=False
-                )
-                if contour_map is not None and contour_map.shape[-2:] != masks.shape[-2:]:
-                    contour_map = torch.nn.functional.interpolate(
-                        contour_map, size=masks.shape[-2:], mode='bilinear', align_corners=False
+            with autocast(enabled=self.use_amp):
+                mask_logits, contour_map = self.model(pixel_values)
+                # Align predictions to GT spatial size if needed
+                if mask_logits.shape[-2:] != masks.shape[-2:]:
+                    mask_logits = torch.nn.functional.interpolate(
+                        mask_logits, size=masks.shape[-2:], mode='bilinear', align_corners=False
                     )
-            # loss on logits
-            mask_loss = self.loss_fn['mask'](mask_logits, masks)
-            merge_loss = self.loss_fn['merge'](mask_logits, masks)
-            # probabilities for metrics only
-            mask_pred = torch.sigmoid(mask_logits)
-            if contours is not None:
-                contour_loss = self.loss_fn['contour'](contour_map, contours)
-                loss = (
-                    self.mask_weight * mask_loss +
-                    self.contour_weight * contour_loss +
-                    self.merge_weight * merge_loss
-                )
-            else:
-                contour_loss = torch.tensor(0.0, device=self.device)
-                loss = self.mask_weight * mask_loss + self.merge_weight * merge_loss
+                    if contour_map is not None and contour_map.shape[-2:] != masks.shape[-2:]:
+                        contour_map = torch.nn.functional.interpolate(
+                            contour_map, size=masks.shape[-2:], mode='bilinear', align_corners=False
+                        )
+                # loss on logits
+                mask_loss = self.loss_fn['mask'](mask_logits, masks)
+                merge_loss = self.loss_fn['merge'](mask_logits, masks)
+                if contours is not None:
+                    contour_loss = self.loss_fn['contour'](contour_map, contours)
+                    loss = (
+                        self.mask_weight * mask_loss +
+                        self.contour_weight * contour_loss +
+                        self.merge_weight * merge_loss
+                    )
+                else:
+                    contour_loss = torch.tensor(0.0, device=self.device)
+                    loss = self.mask_weight * mask_loss + self.merge_weight * merge_loss
 
-            loss.backward()
-            self.optimizer.step()
+            # probabilities for metrics only (outside autocast)
+            mask_pred = torch.sigmoid(mask_logits)
+
+            if self.use_amp:
+                self.scaler.scale(loss).backward()
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+            else:
+                loss.backward()
+                self.optimizer.step()
 
             running_loss += loss.item()
             running_mask_loss += mask_loss.item()
@@ -292,29 +305,30 @@ class SegFormerTrainer(BaseTrainer):
                 if contours is not None:
                     contours = contours.to(self.device)
 
-                mask_logits, contour_map = self.model(pixel_values)
-                # Align predictions to GT spatial size if needed
-                if mask_logits.shape[-2:] != masks.shape[-2:]:
-                    mask_logits = torch.nn.functional.interpolate(
-                        mask_logits, size=masks.shape[-2:], mode='bilinear', align_corners=False
-                    )
-                    if contour_map is not None and contour_map.shape[-2:] != masks.shape[-2:]:
-                        contour_map = torch.nn.functional.interpolate(
-                            contour_map, size=masks.shape[-2:], mode='bilinear', align_corners=False
+                with autocast(enabled=self.use_amp):
+                    mask_logits, contour_map = self.model(pixel_values)
+                    # Align predictions to GT spatial size if needed
+                    if mask_logits.shape[-2:] != masks.shape[-2:]:
+                        mask_logits = torch.nn.functional.interpolate(
+                            mask_logits, size=masks.shape[-2:], mode='bilinear', align_corners=False
                         )
-                # loss on logits
-                mask_loss = self.loss_fn['mask'](mask_logits, masks)
-                merge_loss = self.loss_fn['merge'](mask_logits, masks)
+                        if contour_map is not None and contour_map.shape[-2:] != masks.shape[-2:]:
+                            contour_map = torch.nn.functional.interpolate(
+                                contour_map, size=masks.shape[-2:], mode='bilinear', align_corners=False
+                            )
+                    # loss on logits
+                    mask_loss = self.loss_fn['mask'](mask_logits, masks)
+                    merge_loss = self.loss_fn['merge'](mask_logits, masks)
+                    if contours is not None:
+                        contour_loss = self.loss_fn['contour'](contour_map, contours)
+                        loss = (
+                            self.mask_weight * mask_loss +
+                            self.contour_weight * contour_loss +
+                            self.merge_weight * merge_loss
+                        )
+                    else:
+                        loss = self.mask_weight * mask_loss + self.merge_weight * merge_loss
                 mask_pred = torch.sigmoid(mask_logits)
-                if contours is not None:
-                    contour_loss = self.loss_fn['contour'](contour_map, contours)
-                    loss = (
-                        self.mask_weight * mask_loss +
-                        self.contour_weight * contour_loss +
-                        self.merge_weight * merge_loss
-                    )
-                else:
-                    loss = self.mask_weight * mask_loss + self.merge_weight * merge_loss
 
                 metrics = compute_metrics_batch(mask_pred, masks)
                 # accumulate
