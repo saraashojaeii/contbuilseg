@@ -114,9 +114,8 @@ class CustomDataset(Dataset):
         
         # Always manually handle mask normalization (don't use transform on masks)
         mask_np = np.array(mask, dtype=np.float32)
-        # Normalize to [0, 1] if needed
-        if mask_np.max() > 1.0:
-            mask_np = mask_np / 255.0
+        # Normalize to [0, 1] - always divide by 255 for consistency
+        mask_np = mask_np / 255.0
         mask = torch.from_numpy(mask_np).unsqueeze(0)  # Add channel dimension
         # Clamp to ensure [0, 1] range
         mask = torch.clamp(mask, 0.0, 1.0)
@@ -125,10 +124,9 @@ class CustomDataset(Dataset):
             return image, mask
             
         contour = Image.open(self.label2_paths[idx]).convert('L')
-        # Manually handle contour normalization
+        # Manually handle contour normalization - always divide by 255
         contour_np = np.array(contour, dtype=np.float32)
-        if contour_np.max() > 1.0:
-            contour_np = contour_np / 255.0
+        contour_np = contour_np / 255.0
         contour = torch.from_numpy(contour_np).unsqueeze(0)
         contour = torch.clamp(contour, 0.0, 1.0)
             
