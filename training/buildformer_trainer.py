@@ -168,6 +168,11 @@ class BuildFormerTrainer(BaseTrainer):
 
             self.optimizer.zero_grad(set_to_none=True)
 
+            # Safety check: ensure masks are in [0, 1] BEFORE autocast
+            masks = torch.clamp(masks, 0.0, 1.0)
+            if contours is not None:
+                contours = torch.clamp(contours, 0.0, 1.0)
+
             with autocast(enabled=self.use_amp):
                 mask_logits, contour_map = self.model(images)
                 # Align predictions to GT spatial size if needed
@@ -179,11 +184,6 @@ class BuildFormerTrainer(BaseTrainer):
                         contour_map = torch.nn.functional.interpolate(
                             contour_map, size=masks.shape[-2:], mode='bilinear', align_corners=False
                         )
-                
-                # Safety check: ensure masks are in [0, 1]
-                masks = torch.clamp(masks, 0.0, 1.0)
-                if contours is not None:
-                    contours = torch.clamp(contours, 0.0, 1.0)
                 
                 # loss on logits
                 mask_loss = self.loss_fn['mask'](mask_logits, masks)
@@ -327,6 +327,11 @@ class BuildFormerTrainer(BaseTrainer):
                 if contours is not None:
                     contours = contours.to(self.device)
 
+                # Safety check: ensure masks are in [0, 1] BEFORE autocast
+                masks = torch.clamp(masks, 0.0, 1.0)
+                if contours is not None:
+                    contours = torch.clamp(contours, 0.0, 1.0)
+
                 with autocast(enabled=self.use_amp):
                     mask_logits, contour_map = self.model(images)
                     # Align predictions to GT spatial size if needed
@@ -338,11 +343,6 @@ class BuildFormerTrainer(BaseTrainer):
                             contour_map = torch.nn.functional.interpolate(
                                 contour_map, size=masks.shape[-2:], mode='bilinear', align_corners=False
                             )
-                    
-                    # Safety check: ensure masks are in [0, 1]
-                    masks = torch.clamp(masks, 0.0, 1.0)
-                    if contours is not None:
-                        contours = torch.clamp(contours, 0.0, 1.0)
                     
                     # loss on logits
                     mask_loss = self.loss_fn['mask'](mask_logits, masks)
