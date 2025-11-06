@@ -97,7 +97,22 @@ def load_model(checkpoint_path, model_type, device):
         raise ValueError(f"Unsupported model type: {model_type}")
     
     # Load checkpoint
-    state_dict = torch.load(checkpoint_path, map_location=device)
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    
+    # Handle different checkpoint formats
+    if isinstance(checkpoint, dict):
+        if 'model_state_dict' in checkpoint:
+            # Full training checkpoint
+            state_dict = checkpoint['model_state_dict']
+        elif 'state_dict' in checkpoint:
+            # Alternative format
+            state_dict = checkpoint['state_dict']
+        else:
+            # Direct state dict
+            state_dict = checkpoint
+    else:
+        state_dict = checkpoint
+    
     model.load_state_dict(state_dict)
     model.to(device)
     model.eval()
