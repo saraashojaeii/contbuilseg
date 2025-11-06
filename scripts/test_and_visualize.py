@@ -16,7 +16,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models.buildformer import DualHeadBuildFormer
 from models.unet import UNet
-from data.utils import find_files_with_extensions
+from data.dataset import find_files_with_extensions
 
 
 def calculate_and_color_buildings(ground_truth, prediction):
