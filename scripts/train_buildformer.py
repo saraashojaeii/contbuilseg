@@ -47,7 +47,7 @@ def parse_args():
                         help="Learning rate")
     parser.add_argument("--epochs", type=int, default=100,
                         help="Number of training epochs")
-    parser.add_argument("--save_every", type=int, default=10,
+    parser.add_argument("--save_every", type=int, default=1,
                         help="Save model every N epochs")
     parser.add_argument("--mask_weight", type=float, default=0.7,
                         help="Weight for mask loss")

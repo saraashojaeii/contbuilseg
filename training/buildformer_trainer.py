@@ -378,7 +378,7 @@ class BuildFormerTrainer(BaseTrainer):
                 # Store first batch for visualization later
                 if batch_idx == 0 and self.use_wandb:
                     first_batch_data = {
-                        'pixel_values': images[:4].detach().cpu(),
+                        'images': images[:4].detach().cpu(),  # Use 'images' not 'pixel_values'
                         'masks': masks[:4].detach().cpu(),
                         'mask_pred': mask_pred[:4].detach().cpu(),
                         'contours': contours[:4].detach().cpu() if contours is not None else None,
@@ -423,11 +423,12 @@ class BuildFormerTrainer(BaseTrainer):
             # Log visualizations if we have data
             if first_batch_data is not None:
                 try:
-                    imgs = first_batch_data['pixel_values']
+                    # BuildFormer uses 'images' key, not 'pixel_values'
+                    imgs = first_batch_data.get('images', first_batch_data.get('pixel_values'))
                     preds = first_batch_data['mask_pred']
                     gts = first_batch_data['masks']
-                    contours = first_batch_data['contours']
-                    contour_map = first_batch_data['contour_map']
+                    contours = first_batch_data.get('contours')
+                    contour_map = first_batch_data.get('contour_map')
 
                     wandb_imgs = []
                     for i in range(imgs.shape[0]):
@@ -521,18 +522,19 @@ class BuildFormerTrainer(BaseTrainer):
 
         print(f"Loaded model from {checkpoint_path}")
 
-    def train(self, num_epochs=100, save_every=1):
+    def train(self, num_epochs=100, save_every=10):
         """
-        Train the BuildFormer model with model saving after each epoch.
+        Train the BuildFormer model with periodic model saving.
 
         Args:
             num_epochs: Number of epochs to train
-            save_every: Save model after every epoch (set to 1 for every epoch)
+            save_every: Save model checkpoint every N epochs
 
         Returns:
             Training history
         """
         print(f"Starting BuildFormer training for {num_epochs} epochs...")
+        print(f"Saving model checkpoints every {save_every} epoch(s) to {self.model_save_dir}")
         start_time = time.time()
 
         for epoch in range(1, num_epochs + 1):
@@ -552,8 +554,10 @@ class BuildFormerTrainer(BaseTrainer):
                   f"IoU: {metrics['iou']:.4f}, "
                   f"F1: {metrics['f1']:.4f}")
 
-            # Save model after each epoch
-            self.save_model(epoch, final=False)
+            # Save model checkpoint every save_every epochs
+            if epoch % save_every == 0:
+                self.save_model(epoch, final=False)
+                print(f"✓ Checkpoint saved at epoch {epoch}")
 
             # Plot losses at regular intervals or at the end
             if epoch % max(10, num_epochs // 10) == 0 or epoch == num_epochs:
