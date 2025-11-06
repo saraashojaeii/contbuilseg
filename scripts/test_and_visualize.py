@@ -14,7 +14,7 @@ from torchvision import transforms
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from models.buildformer import BuildFormer
+from models.buildformer import DualHeadBuildFormer
 from models.unet import UNet
 from data.utils import find_files_with_extensions
 
@@ -82,7 +82,7 @@ def load_model(checkpoint_path, model_type, device):
         Loaded model in eval mode
     """
     if model_type == 'buildformer':
-        model = BuildFormer(
+        model = DualHeadBuildFormer(
             in_channels=3,
             out_channels_mask=1,
             out_channels_contour=1
