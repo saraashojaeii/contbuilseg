@@ -155,8 +155,16 @@ def predict_image(model, image_path, device, model_type):
         else:
             raise ValueError(f"Unsupported model type: {model_type}")
     
-    # Convert to numpy and scale to 0-255
+    # Convert to numpy (0-1 range from sigmoid)
     prediction = prediction.squeeze().cpu().numpy()
+    
+    # Normalize to full 0-1 range for better contrast
+    pred_min = prediction.min()
+    pred_max = prediction.max()
+    if pred_max > pred_min:
+        prediction = (prediction - pred_min) / (pred_max - pred_min)
+    
+    # Convert to 0-255
     prediction = (prediction * 255).astype(np.uint8)
     
     return prediction
