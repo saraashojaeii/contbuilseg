@@ -90,8 +90,8 @@ def load_model(checkpoint_path, model_type, device):
     elif model_type == 'unet':
         model = UNet(
             in_channels=3,
-            out_channels=1,
-            features=[64, 128, 256, 512]
+            out_channels_mask=1,
+            out_channels_contour=1
         )
     else:
         raise ValueError(f"Unsupported model type: {model_type}")
@@ -131,7 +131,10 @@ def predict_image(model, image_path, device, model_type):
         if model_type == 'buildformer':
             mask_logits, _ = model(image_tensor)
             prediction = torch.sigmoid(mask_logits)
-        elif model_type in ['unet', 'segformer']:
+        elif model_type == 'unet':
+            mask_logits, _ = model(image_tensor)
+            prediction = torch.sigmoid(mask_logits)
+        elif model_type == 'segformer':
             logits = model(image_tensor)
             prediction = torch.sigmoid(logits)
         else:
