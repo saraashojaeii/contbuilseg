@@ -181,6 +181,8 @@ def main():
     # Output parameters
     parser.add_argument('--output_dir', type=str, required=True,
                         help='Directory to save predictions and visualizations')
+    parser.add_argument('--threshold', type=float, default=0.5,
+                        help='Threshold for binarizing predictions (0-1)')
     
     # Device
     parser.add_argument('--device', type=str, default='cuda',
@@ -222,9 +224,10 @@ def main():
         return
     
     print(f"Found {len(test_img_paths)} test images")
+    print(f"Using threshold: {args.threshold} ({int(args.threshold * 255)}/255)\n")
     
     # Process each test image
-    for img_path in tqdm(test_img_paths, desc="Processing test images"):
+    for img_idx, img_path in enumerate(tqdm(test_img_paths, desc="Processing test images")):
         # Get image name
         img_name = os.path.basename(img_path)
         img_base = os.path.splitext(img_name)[0]
@@ -240,23 +243,38 @@ def main():
             print(f"Warning: No ground truth found for {img_name}, skipping...")
             continue
         
-        # Generate prediction
+        # Generate prediction (returns float in 0-255 range)
         prediction = predict_image(model, img_path, device, args.model_type)
         
-        # Save raw prediction
+        # Debug: Print prediction statistics for first few images
+        if img_idx < 3:
+            print(f"\n{img_name} - Prediction stats:")
+            print(f"  Min: {prediction.min()}, Max: {prediction.max()}, Mean: {prediction.mean():.2f}")
+        
+        # Save raw prediction (grayscale)
         pred_save_path = os.path.join(pred_dir, f"{img_base}_pred.png")
         cv2.imwrite(pred_save_path, prediction)
+        
+        # Apply threshold to get binary mask
+        threshold_value = int(args.threshold * 255)  # Convert 0-1 to 0-255
+        _, prediction_binary = cv2.threshold(prediction, threshold_value, 255, cv2.THRESH_BINARY)
+        
+        # Debug: Print how many pixels are above threshold
+        if img_idx < 3:
+            pixels_above = (prediction_binary == 255).sum()
+            total_pixels = prediction_binary.size
+            print(f"  Pixels above threshold: {pixels_above}/{total_pixels} ({100*pixels_above/total_pixels:.1f}%)")
         
         # Load ground truth
         ground_truth = cv2.imread(gt_path, cv2.IMREAD_GRAYSCALE)
         
         # Resize prediction to match ground truth if needed
-        if prediction.shape != ground_truth.shape:
-            prediction = cv2.resize(prediction, (ground_truth.shape[1], ground_truth.shape[0]))
+        if prediction_binary.shape != ground_truth.shape:
+            prediction_binary = cv2.resize(prediction_binary, (ground_truth.shape[1], ground_truth.shape[0]))
         
         # Create color-coded visualization
         try:
-            binary_gt, binary_pred, colored_image = calculate_and_color_buildings(ground_truth, prediction)
+            binary_gt, binary_pred, colored_image = calculate_and_color_buildings(ground_truth, prediction_binary)
             
             # Save color-coded visualization
             colored_save_path = os.path.join(colored_dir, f"{img_base}_colored.png")
