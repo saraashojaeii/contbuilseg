@@ -97,7 +97,7 @@ def load_model(checkpoint_path, model_type, device):
         )
     elif model_type == 'segformer':
         model = DualHeadSegFormer(
-            model_name='nvidia/mit-b0',  # Default backbone
+            pretrained_model_name='nvidia/mit-b0',  # Default backbone
             num_labels=1
         )
     else:
