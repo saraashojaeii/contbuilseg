@@ -147,9 +147,9 @@ def predict_image(model, image_path, device, model_type):
     
     # Preprocess based on model type
     if model_type == 'segformer':
-        # Use HuggingFace processor for SegFormer
+        # Use HuggingFace processor for SegFormer (do_resize=False to keep original size)
         processor = SegformerImageProcessor.from_pretrained('nvidia/mit-b0')
-        inputs = processor(images=image, return_tensors='pt')
+        inputs = processor(images=image, return_tensors='pt', do_resize=False)
         image_tensor = inputs['pixel_values'].to(device)
     else:
         # Use standard transforms for UNet/BuildFormer
@@ -165,13 +165,20 @@ def predict_image(model, image_path, device, model_type):
         elif model_type == 'unet':
             mask_logits, _ = model(image_tensor)
         elif model_type == 'segformer':
-            # SegFormer expects pixel_values as keyword argument
+            # SegFormer wrapper (DualHeadSegFormer) - use positional argument
             mask_logits, _ = model(image_tensor)
             # SegFormer output may be at different resolution - interpolate to original size
-            if mask_logits.shape[-2:] != (original_size[1], original_size[0]):
+            output_size = mask_logits.shape[-2:]
+            target_size = (original_size[1], original_size[0])  # (height, width)
+            if output_size != target_size:
+                # Debug: print first time
+                import sys
+                if not hasattr(sys, '_segformer_resize_printed'):
+                    print(f"SegFormer output size {output_size} != target {target_size}, interpolating...")
+                    sys._segformer_resize_printed = True
                 mask_logits = torch.nn.functional.interpolate(
                     mask_logits, 
-                    size=(original_size[1], original_size[0]),  # (height, width)
+                    size=target_size,
                     mode='bilinear', 
                     align_corners=False
                 )
