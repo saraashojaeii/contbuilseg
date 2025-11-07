@@ -133,10 +133,106 @@ class CustomDataset(Dataset):
         return image, mask, contour
 
 
+class TiledCustomDataset(Dataset):
+    """
+    Tiled dataset for UNet/BuildFormer (uses transforms instead of image_processor).
+    Yields fixed-size tiles from large images for models that use standard PyTorch transforms.
+    """
+    def __init__(
+        self,
+        image_paths: List[str],
+        label_paths: List[str],
+        contour_paths: Optional[List[str]] = None,
+        transform=None,
+        tile_size: int = 512,
+        stride: Optional[int] = None,
+    ):
+        self.image_paths = image_paths
+        self.label_paths = label_paths
+        self.contour_paths = contour_paths
+        self.transform = transform
+        self.tile_size = tile_size
+        self.stride = stride or tile_size
+
+        # Build tile index: list of (img_idx, y, x)
+        self._tiles = []
+        for i, img_path in enumerate(self.image_paths):
+            with Image.open(img_path) as im:
+                w, h = im.size
+            # Compute grid with full coverage
+            y_positions = list(range(0, max(1, h - self.tile_size + 1), self.stride))
+            x_positions = list(range(0, max(1, w - self.tile_size + 1), self.stride))
+            if len(y_positions) == 0:
+                y_positions = [0]
+            if len(x_positions) == 0:
+                x_positions = [0]
+            if y_positions[-1] + self.tile_size < h:
+                y_positions.append(max(0, h - self.tile_size))
+            if x_positions[-1] + self.tile_size < w:
+                x_positions.append(max(0, w - self.tile_size))
+            for top in y_positions:
+                for left in x_positions:
+                    self._tiles.append((i, top, left))
+
+    def __len__(self) -> int:
+        return len(self._tiles)
+
+    def _crop_with_pad(self, img: Image.Image, box: Tuple[int, int, int, int]) -> Image.Image:
+        """Crop image with box, padding if necessary"""
+        if img is None:
+            return None
+        left, top, right, bottom = box
+        w, h = img.size
+        # If box is entirely within image, just crop
+        if left >= 0 and top >= 0 and right <= w and bottom <= h:
+            return img.crop(box)
+        # Otherwise create canvas and paste
+        canvas = Image.new(img.mode, (right - left, bottom - top), 0)
+        paste_box = (max(0, -left), max(0, -top))
+        crop_box = (max(0, left), max(0, top), min(w, right), min(h, bottom))
+        canvas.paste(img.crop(crop_box), paste_box)
+        return canvas
+
+    def __getitem__(self, idx: int):
+        img_idx, top, left = self._tiles[idx]
+
+        image = Image.open(self.image_paths[img_idx]).convert('RGB')
+        mask = Image.open(self.label_paths[img_idx]).convert('L')
+        contour = None
+        if self.contour_paths is not None:
+            contour = Image.open(self.contour_paths[img_idx]).convert('L')
+
+        # Crop tiles
+        tile_box = (left, top, left + self.tile_size, top + self.tile_size)
+        image_tile = self._crop_with_pad(image, tile_box)
+        mask_tile = self._crop_with_pad(mask, tile_box)
+        contour_tile = self._crop_with_pad(contour, tile_box) if contour is not None else None
+
+        # Apply transform to image
+        if self.transform:
+            image_tile = self.transform(image_tile)
+
+        # Manually handle mask normalization
+        mask_np = np.array(mask_tile, dtype=np.float32)
+        mask_np = mask_np / 255.0
+        mask_tile = torch.from_numpy(mask_np).unsqueeze(0)
+        mask_tile = torch.clamp(mask_tile, 0.0, 1.0)
+
+        if contour_tile is not None:
+            contour_np = np.array(contour_tile, dtype=np.float32)
+            contour_np = contour_np / 255.0
+            contour_tile = torch.from_numpy(contour_np).unsqueeze(0)
+            contour_tile = torch.clamp(contour_tile, 0.0, 1.0)
+            return image_tile, mask_tile, contour_tile
+
+        return image_tile, mask_tile
+
+
 class TiledDataPrep(Dataset):
     """
     Dataset that yields fixed-size tiles from large images and corresponding masks (and optional contours).
     Useful for very large inputs like INRIA (e.g., 5000x5000) to avoid GPU OOM.
+    Uses HuggingFace image_processor (for SegFormer).
     """
     def __init__(
         self,

@@ -13,7 +13,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from models.buildformer import get_buildformer_model
-from data.dataset import CustomDataset
+from data.dataset import CustomDataset, TiledCustomDataset
 from training.buildformer_trainer import BuildFormerTrainer
 from torchvision import transforms
 
@@ -157,19 +157,38 @@ def main():
     print(f"Found {len(train_img_paths)} training images, {len(val_img_paths)} validation images, "
           f"and {len(test_img_paths)} test images")
     
-    # Create datasets - BuildFormer uses standard CustomDataset (not HF processor-based)
-    train_dataset = CustomDataset(
-        train_img_paths, 
-        train_mask_paths, 
-        train_contour_paths, 
-        transform=transform
-    )
-    val_dataset = CustomDataset(
-        val_img_paths, 
-        val_mask_paths, 
-        val_contour_paths,
-        transform=transform
-    )
+    # Create datasets (use tiling if requested)
+    if args.use_tiling:
+        print(f"Using TiledCustomDataset with tile_size={args.tile_size}, stride={args.tile_stride}")
+        train_dataset = TiledCustomDataset(
+            train_img_paths, 
+            train_mask_paths, 
+            contour_paths=train_contour_paths,
+            transform=transform,
+            tile_size=args.tile_size,
+            stride=args.tile_stride
+        )
+        val_dataset = TiledCustomDataset(
+            val_img_paths, 
+            val_mask_paths, 
+            contour_paths=val_contour_paths,
+            transform=transform,
+            tile_size=args.tile_size,
+            stride=args.tile_stride
+        )
+    else:
+        train_dataset = CustomDataset(
+            train_img_paths, 
+            train_mask_paths, 
+            train_contour_paths, 
+            transform=transform
+        )
+        val_dataset = CustomDataset(
+            val_img_paths, 
+            val_mask_paths, 
+            val_contour_paths,
+            transform=transform
+        )
     
     # Create dataloaders
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
