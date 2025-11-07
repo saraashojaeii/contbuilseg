@@ -85,9 +85,7 @@ def load_model(checkpoint_path, model_type, device):
     """
     if model_type == 'buildformer':
         model = DualHeadBuildFormer(
-            in_channels=3,
-            out_channels_mask=1,
-            out_channels_contour=1
+            num_labels=1
         )
     elif model_type == 'unet':
         model = UNet(
