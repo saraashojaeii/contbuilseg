@@ -143,6 +143,7 @@ def predict_image(model, image_path, device, model_type):
     """
     # Load image
     image = Image.open(image_path).convert('RGB')
+    original_size = image.size  # (width, height)
     
     # Preprocess based on model type
     if model_type == 'segformer':
@@ -161,15 +162,23 @@ def predict_image(model, image_path, device, model_type):
     with torch.no_grad():
         if model_type == 'buildformer':
             mask_logits, _ = model(image_tensor)
-            prediction = torch.sigmoid(mask_logits)
         elif model_type == 'unet':
             mask_logits, _ = model(image_tensor)
-            prediction = torch.sigmoid(mask_logits)
         elif model_type == 'segformer':
+            # SegFormer expects pixel_values as keyword argument
             mask_logits, _ = model(image_tensor)
-            prediction = torch.sigmoid(mask_logits)
+            # SegFormer output may be at different resolution - interpolate to original size
+            if mask_logits.shape[-2:] != (original_size[1], original_size[0]):
+                mask_logits = torch.nn.functional.interpolate(
+                    mask_logits, 
+                    size=(original_size[1], original_size[0]),  # (height, width)
+                    mode='bilinear', 
+                    align_corners=False
+                )
         else:
             raise ValueError(f"Unsupported model type: {model_type}")
+        
+        prediction = torch.sigmoid(mask_logits)
     
     # Convert to numpy (0-1 range from sigmoid)
     prediction = prediction.squeeze().cpu().numpy()
