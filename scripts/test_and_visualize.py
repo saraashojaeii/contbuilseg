@@ -16,7 +16,9 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models.buildformer import DualHeadBuildFormer
 from models.unet import UNet
+from models.segformer import DualHeadSegFormer
 from data.dataset import find_files_with_extensions
+from transformers import SegformerImageProcessor
 
 
 def calculate_and_color_buildings(ground_truth, prediction):
@@ -93,6 +95,11 @@ def load_model(checkpoint_path, model_type, device):
             out_channels_mask=1,
             out_channels_contour=1
         )
+    elif model_type == 'segformer':
+        model = DualHeadSegFormer(
+            model_name='nvidia/mit-b0',  # Default backbone
+            num_labels=1
+        )
     else:
         raise ValueError(f"Unsupported model type: {model_type}")
     
@@ -134,12 +141,21 @@ def predict_image(model, image_path, device, model_type):
     Returns:
         prediction: Binary mask prediction (numpy array, 0-255)
     """
-    # Load and preprocess image
+    # Load image
     image = Image.open(image_path).convert('RGB')
-    transform = transforms.Compose([
-        transforms.ToTensor(),
-    ])
-    image_tensor = transform(image).unsqueeze(0).to(device)
+    
+    # Preprocess based on model type
+    if model_type == 'segformer':
+        # Use HuggingFace processor for SegFormer
+        processor = SegformerImageProcessor.from_pretrained('nvidia/mit-b0')
+        inputs = processor(images=image, return_tensors='pt')
+        image_tensor = inputs['pixel_values'].to(device)
+    else:
+        # Use standard transforms for UNet/BuildFormer
+        transform = transforms.Compose([
+            transforms.ToTensor(),
+        ])
+        image_tensor = transform(image).unsqueeze(0).to(device)
     
     # Run inference
     with torch.no_grad():
@@ -150,8 +166,8 @@ def predict_image(model, image_path, device, model_type):
             mask_logits, _ = model(image_tensor)
             prediction = torch.sigmoid(mask_logits)
         elif model_type == 'segformer':
-            logits = model(image_tensor)
-            prediction = torch.sigmoid(logits)
+            mask_logits, _ = model(image_tensor)
+            prediction = torch.sigmoid(mask_logits)
         else:
             raise ValueError(f"Unsupported model type: {model_type}")
     
