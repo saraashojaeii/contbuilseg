@@ -23,7 +23,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Train BuildFormer model for building segmentation")
     
     # Data paths
-    parser.add_argument("--data_dir", type=str, required=True,
+    parser.add_argument("--data_dir", type=str, required=True, default="/root/home/pvc/building_segmetation_datasets/", 
                         help="Base directory containing dataset folders (dataset will be at data_dir/dataset_name)")
     parser.add_argument("--dataset_name", type=str, required=True,
                         help="Name of the dataset (used for organizing saved models and predictions)")
