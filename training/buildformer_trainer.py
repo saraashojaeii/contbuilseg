@@ -482,7 +482,7 @@ class BuildFormerTrainer(BaseTrainer):
     
     def save_model(self, epoch, final=False):
         """
-        Save BuildFormer model weights as .pth file.
+        Save BuildFormer model checkpoint including optimizer state and training history.
         
         Args:
             epoch: Current epoch number
@@ -493,51 +493,81 @@ class BuildFormerTrainer(BaseTrainer):
         else:
             save_path = f"{self.model_save_dir}/epoch_{epoch}.pth"
 
-        # Save model state_dict as .pth file
-        torch.save(self.model.state_dict(), save_path)
-        print(f"Model weights saved to {save_path}")
+        # Save complete checkpoint with model, optimizer, and history
+        checkpoint = {
+            'epoch': epoch,
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'train_loss': self.history['train_loss'],
+            'val_loss': self.history['val_loss'],
+            'metrics': self.history['metrics']
+        }
+        torch.save(checkpoint, save_path)
+        print(f"Model checkpoint saved to {save_path}")
     
     def load_checkpoint(self, checkpoint_path):
         """
-        Load BuildFormer model checkpoint.
+        Load BuildFormer model checkpoint including optimizer state and training history.
         
         Args:
-            checkpoint_path: Path to checkpoint directory or file
+            checkpoint_path: Path to checkpoint file (.pth)
+            
+        Returns:
+            int: Next epoch to start training from (loaded_epoch + 1)
         """
-        from transformers import SegformerForSemanticSegmentation
+        print(f"Loading checkpoint from {checkpoint_path}...")
+        checkpoint = torch.load(checkpoint_path, map_location=self.device)
+        
+        # Load model state
+        if 'model_state_dict' in checkpoint:
+            self.model.load_state_dict(checkpoint['model_state_dict'])
+            print(f"✓ Loaded model state from epoch {checkpoint['epoch']}")
+        else:
+            # Old format - just model weights
+            self.model.load_state_dict(checkpoint)
+            print(f"✓ Loaded model weights (old format)")
+            return 1
+        
+        # Load optimizer state
+        if 'optimizer_state_dict' in checkpoint:
+            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            print(f"✓ Loaded optimizer state")
+        
+        # Load training history
+        if 'train_loss' in checkpoint:
+            self.history['train_loss'] = checkpoint['train_loss']
+            print(f"✓ Loaded training history ({len(self.history['train_loss'])} epochs)")
+        if 'val_loss' in checkpoint:
+            self.history['val_loss'] = checkpoint['val_loss']
+        if 'metrics' in checkpoint:
+            self.history['metrics'] = checkpoint['metrics']
+        
+        loaded_epoch = checkpoint.get('epoch', 0)
+        next_epoch = loaded_epoch + 1
+        print(f"✓ Checkpoint loaded successfully. Resuming from epoch {next_epoch}")
+        
+        return next_epoch
 
-        # Try to load as HF checkpoint first
-        try:
-            loaded = SegformerForSemanticSegmentation.from_pretrained(checkpoint_path)
-            # If current model has a .backbone (our wrapper), swap it in
-            if hasattr(self.model, 'backbone'):
-                self.model.backbone = loaded.to(self.device)
-            else:
-                self.model = loaded.to(self.device)
-        except Exception:
-            # Fallback to plain state_dict
-            import torch
-            state = torch.load(checkpoint_path, map_location=self.device)
-            self.model.load_state_dict(state)
-
-        print(f"Loaded model from {checkpoint_path}")
-
-    def train(self, num_epochs=100, save_every=10):
+    def train(self, num_epochs=100, save_every=10, start_epoch=1):
         """
         Train the BuildFormer model with periodic model saving.
 
         Args:
-            num_epochs: Number of epochs to train
+            num_epochs: Total number of epochs (target epoch)
             save_every: Save model checkpoint every N epochs
+            start_epoch: Starting epoch number (1 for new training, >1 for resuming)
 
         Returns:
             Training history
         """
-        print(f"Starting BuildFormer training for {num_epochs} epochs...")
+        if start_epoch > 1:
+            print(f"Resuming BuildFormer training from epoch {start_epoch} to {num_epochs}...")
+        else:
+            print(f"Starting BuildFormer training for {num_epochs} epochs...")
         print(f"Saving model checkpoints every {save_every} epoch(s) to {self.model_save_dir}")
         start_time = time.time()
 
-        for epoch in range(1, num_epochs + 1):
+        for epoch in range(start_epoch, num_epochs + 1):
             # Train
             train_loss = self._train_epoch(epoch)
             self.history['train_loss'].append(train_loss)

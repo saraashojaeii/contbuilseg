@@ -82,6 +82,10 @@ def parse_args():
     parser.add_argument("--wandb_project", type=str, default="building_seg", help="W&B project name")
     parser.add_argument("--wandb_run_name", type=str, default=None, help="Optional W&B run name")
     
+    # Checkpoint resuming
+    parser.add_argument("--resume_from", type=str, default=None,
+                        help="Path to checkpoint file to resume training from (e.g., epoch_50.pth)")
+    
     return parser.parse_args()
 
 
@@ -213,8 +217,14 @@ def main():
         use_amp=args.use_amp,
     )
     
+    # Resume from checkpoint if specified
+    start_epoch = 1
+    if args.resume_from:
+        start_epoch = trainer.load_checkpoint(args.resume_from)
+        print(f"Resuming training from epoch {start_epoch}")
+    
     # Train model
-    trainer.train(num_epochs=args.epochs, save_every=args.save_every)
+    trainer.train(num_epochs=args.epochs, save_every=args.save_every, start_epoch=start_epoch)
 
 
 if __name__ == "__main__":
