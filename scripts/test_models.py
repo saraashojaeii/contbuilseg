@@ -260,9 +260,6 @@ def test_segformer(args, paths):
             stride=args.tile_stride,
             processor_kwargs=proc_kwargs,
         )
-        # Load original images to get dimensions
-        from PIL import Image
-        original_sizes = [Image.open(p).size for p in paths['images']]  # (W, H)
     else:
         dataset = DataPrep(paths['images'], paths['masks'], processor, processor_kwargs=proc_kwargs)
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
@@ -274,13 +271,12 @@ def test_segformer(args, paths):
     rows = []
     
     if args.use_tiling:
-        # Tiled inference: reconstruct full images
+        # Tiled inference: evaluate per tile
         with torch.no_grad():
-            # Group tiles by image
-            tile_groups = {}  # img_idx -> {'preds': [], 'tiles': [], 'mask': tensor}
-            for tile_idx, batch in enumerate(tqdm(loader, desc='Testing SegFormer (tiled)')):
+            idx = 0
+            for batch in tqdm(loader, desc='Testing SegFormer (tiled)'):
                 pixel_values = batch['pixel_values'].to(args.device)
-                masks = batch['mask']
+                masks = batch['mask'].to(args.device)
                 
                 with autocast(enabled=bool(args.use_amp and (str(args.device).startswith('cuda') and torch.cuda.is_available()))):
                     if use_wrapper:
@@ -289,40 +285,15 @@ def test_segformer(args, paths):
                         outputs = model(pixel_values=pixel_values)
                         logits = outputs.logits
                 
+                logits = upsample_like(logits, masks)
                 probs = torch.sigmoid(logits)
                 
-                # Get tile metadata
+                # Compute metrics per tile
                 for i in range(probs.shape[0]):
-                    actual_idx = tile_idx * args.batch_size + i
-                    if actual_idx < len(dataset._tiles):
-                        img_idx, top, left = dataset._tiles[actual_idx]
-                        
-                        if img_idx not in tile_groups:
-                            # Load full mask for this image
-                            full_mask = Image.open(paths['masks'][img_idx]).convert('L')
-                            mask_arr = np.array(full_mask).astype(np.float32) / 255.0
-                            mask_tensor = torch.from_numpy(mask_arr).unsqueeze(0)
-                            tile_groups[img_idx] = {'preds': [], 'tiles': [], 'mask': mask_tensor}
-                        
-                        tile_groups[img_idx]['preds'].append(probs[i].cpu())
-                        tile_groups[img_idx]['tiles'].append((img_idx, top, left))
-            
-            # Reconstruct and evaluate each image
-            print(f"\nReconstructing and evaluating {len(tile_groups)} images...")
-            for img_idx in tqdm(sorted(tile_groups.keys()), desc='Reconstructing images'):
-                W, H = original_sizes[img_idx]
-                reconstructed = reconstruct_from_tiles(
-                    tile_groups[img_idx]['preds'],
-                    tile_groups[img_idx]['tiles'],
-                    (H, W),
-                    args.tile_size,
-                    args.tile_stride
-                )
-                full_mask = tile_groups[img_idx]['mask']
-                
-                m = compute_all_metrics(reconstructed.unsqueeze(0), full_mask.unsqueeze(0))
-                m['sample_idx'] = img_idx
-                rows.append(m)
+                    m = compute_all_metrics(probs[i:i+1].cpu(), masks[i:i+1].cpu())
+                    m['sample_idx'] = idx
+                    rows.append(m)
+                    idx += 1
     else:
         # Standard full-image inference
         with torch.no_grad():
@@ -377,9 +348,6 @@ def test_buildformer(args, paths):
             tile_size=args.tile_size,
             stride=args.tile_stride,
         )
-        # Load original images to get dimensions
-        from PIL import Image
-        original_sizes = [Image.open(p).size for p in paths['images']]  # (W, H)
     else:
         dataset = CustomDataset(paths['images'], paths['masks'], transform=transform)
     
@@ -397,51 +365,26 @@ def test_buildformer(args, paths):
     rows = []
     
     if args.use_tiling:
-        # Tiled inference: reconstruct full images
+        # Tiled inference: evaluate per tile
         with torch.no_grad():
-            # Group tiles by image
-            tile_groups = {}  # img_idx -> {'preds': [], 'tiles': [], 'mask': tensor}
-            for tile_idx, batch in enumerate(tqdm(loader, desc='Testing BuildFormer (tiled)')):
+            idx = 0
+            for batch in tqdm(loader, desc='Testing BuildFormer (tiled)'):
                 images, masks = batch
                 images = images.to(args.device)
+                masks = masks.to(args.device)
                 
                 with autocast(enabled=bool(args.use_amp and (str(args.device).startswith('cuda') and torch.cuda.is_available()))):
                     logits, _ = model(images)
                 
+                logits = upsample_like(logits, masks)
                 probs = torch.sigmoid(logits)
                 
-                # Get tile metadata
+                # Compute metrics per tile
                 for i in range(probs.shape[0]):
-                    actual_idx = tile_idx * args.batch_size + i
-                    if actual_idx < len(dataset._tiles):
-                        img_idx, top, left = dataset._tiles[actual_idx]
-                        
-                        if img_idx not in tile_groups:
-                            # Load full mask for this image
-                            full_mask = Image.open(paths['masks'][img_idx]).convert('L')
-                            mask_arr = np.array(full_mask).astype(np.float32) / 255.0
-                            mask_tensor = torch.from_numpy(mask_arr).unsqueeze(0)
-                            tile_groups[img_idx] = {'preds': [], 'tiles': [], 'mask': mask_tensor}
-                        
-                        tile_groups[img_idx]['preds'].append(probs[i].cpu())
-                        tile_groups[img_idx]['tiles'].append((img_idx, top, left))
-            
-            # Reconstruct and evaluate each image
-            print(f"\nReconstructing and evaluating {len(tile_groups)} images...")
-            for img_idx in tqdm(sorted(tile_groups.keys()), desc='Reconstructing images'):
-                W, H = original_sizes[img_idx]
-                reconstructed = reconstruct_from_tiles(
-                    tile_groups[img_idx]['preds'],
-                    tile_groups[img_idx]['tiles'],
-                    (H, W),
-                    args.tile_size,
-                    args.tile_stride
-                )
-                full_mask = tile_groups[img_idx]['mask']
-                
-                m = compute_all_metrics(reconstructed.unsqueeze(0), full_mask.unsqueeze(0))
-                m['sample_idx'] = img_idx
-                rows.append(m)
+                    m = compute_all_metrics(probs[i:i+1].cpu(), masks[i:i+1].cpu())
+                    m['sample_idx'] = idx
+                    rows.append(m)
+                    idx += 1
     else:
         # Standard full-image inference
         with torch.no_grad():
