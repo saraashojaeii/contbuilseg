@@ -308,7 +308,8 @@ def test_segformer(args, paths):
                         tile_groups[img_idx]['tiles'].append((img_idx, top, left))
             
             # Reconstruct and evaluate each image
-            for img_idx in sorted(tile_groups.keys()):
+            print(f"\nReconstructing and evaluating {len(tile_groups)} images...")
+            for img_idx in tqdm(sorted(tile_groups.keys()), desc='Reconstructing images'):
                 W, H = original_sizes[img_idx]
                 reconstructed = reconstruct_from_tiles(
                     tile_groups[img_idx]['preds'],
@@ -346,12 +347,18 @@ def test_segformer(args, paths):
                     idx += 1
 
     df = pd.DataFrame(rows)
-    df.to_csv(os.path.join(args.output_dir, f'segformer_{args.dataset_name}_{args.split}.csv'), index=False)
+    csv_path = os.path.join(args.output_dir, f'segformer_{args.dataset_name}_{args.split}.csv')
+    df.to_csv(csv_path, index=False)
+    print(f"\nResults saved to: {csv_path}")
+    print(f"Total images evaluated: {len(df)}")
 
     avg = df.drop(columns=['sample_idx'], errors='ignore').mean().to_dict()
-    print('\nAverages (SegFormer):')
+    print('\n' + '='*50)
+    print('Averages (SegFormer):')
+    print('='*50)
     for k, v in avg.items():
         print(f'{k}: {v:.4f}')
+    print('='*50)
 
 
 def test_buildformer(args, paths):
@@ -420,7 +427,8 @@ def test_buildformer(args, paths):
                         tile_groups[img_idx]['tiles'].append((img_idx, top, left))
             
             # Reconstruct and evaluate each image
-            for img_idx in sorted(tile_groups.keys()):
+            print(f"\nReconstructing and evaluating {len(tile_groups)} images...")
+            for img_idx in tqdm(sorted(tile_groups.keys()), desc='Reconstructing images'):
                 W, H = original_sizes[img_idx]
                 reconstructed = reconstruct_from_tiles(
                     tile_groups[img_idx]['preds'],
@@ -457,12 +465,18 @@ def test_buildformer(args, paths):
                     idx += 1
 
     df = pd.DataFrame(rows)
-    df.to_csv(os.path.join(args.output_dir, f'buildformer_{args.dataset_name}_{args.split}.csv'), index=False)
+    csv_path = os.path.join(args.output_dir, f'buildformer_{args.dataset_name}_{args.split}.csv')
+    df.to_csv(csv_path, index=False)
+    print(f"\nResults saved to: {csv_path}")
+    print(f"Total images evaluated: {len(df)}")
 
     avg = df.drop(columns=['sample_idx'], errors='ignore').mean().to_dict()
-    print('\nAverages (BuildFormer):')
+    print('\n' + '='*50)
+    print('Averages (BuildFormer):')
+    print('='*50)
     for k, v in avg.items():
         print(f'{k}: {v:.4f}')
+    print('='*50)
 
 
 
